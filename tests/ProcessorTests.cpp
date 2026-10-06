@@ -66,7 +66,7 @@ int main()
         auto editor=std::unique_ptr<juce::AudioProcessorEditor>(a.createEditor()); CHECK(editor);
         if (auto* path=std::getenv("CSYNTH_EDITOR_CAPTURE")) {
             auto snapshot=editor->createComponentSnapshot(editor->getLocalBounds());
-            juce::FileOutputStream output{juce::File(path)}; CHECK(output.openedOk());
+            juce::FileOutputStream output{juce::File(path)}; CHECK(output.openedOk()); output.setPosition(0); output.truncate();
             CHECK(juce::PNGImageFormat().writeImageToStream(snapshot,output));
         }
         editor.reset(); a.releaseResources(); b.releaseResources();

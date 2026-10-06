@@ -13,7 +13,8 @@ private:
         Knob(const juce::String& name, const juce::String& suffix = {});
         void bind(juce::AudioProcessorValueTreeState&, const juce::String& id);
         void resized() override;
-        juce::Label label;
+        void setAvailability(const juce::String& reason, const juce::String& explanation = {});
+        juce::Label label, availability;
         juce::Slider slider;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };
@@ -24,7 +25,7 @@ private:
     juce::LookAndFeel_V4 look;
     juce::ComboBox presets, layer, op, waveform, envelope;
     juce::TextButton previous{"<"}, next{">"}, import{"Import .synth"}, exportSound{"Export .synth"}, release{"Release notes"};
-    juce::Label layerLabel, operatorLabel, status;
+    juce::Label layerLabel, operatorLabel, status, envelopeAvailability;
     juce::MidiKeyboardComponent keyboard;
     juce::TooltipWindow tooltips{this,500};
     std::vector<std::unique_ptr<Knob>> globalKnobs, effectKnobs, layerKnobs, operatorKnobs;

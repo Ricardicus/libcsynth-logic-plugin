@@ -249,6 +249,13 @@ Knobs support dragging, wheel changes, and typing into their value boxes.
 Shift-drag provides fine control. **Release notes** releases the held MIDI notes;
 the configured release and effect tails still finish normally.
 
+Disabled operator controls show a reason below the knob. For example, pulse
+width asks you to choose Pulse, and index-envelope knobs ask for Decay or ADSR
+mode. The carrier has no FM depth or index envelope; select an earlier operator
+or increase Active operators to make it a modulator. Hover a control’s label or
+reason for the full explanation. These hints update when you change the selected
+operator, waveform, envelope mode, or preset.
+
 ## Saving sounds and projects
 
 Saving the Logic project stores the complete parameter state for each plugin

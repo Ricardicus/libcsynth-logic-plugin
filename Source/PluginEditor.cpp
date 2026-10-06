@@ -10,7 +10,10 @@ CSynthEditor::Knob::Knob(const juce::String& name, const juce::String& suffix)
     slider.setTextValueSuffix(suffix);
     slider.setPopupDisplayEnabled(true,false,this);
     slider.setVelocityModeParameters(1,1,.1,true,juce::ModifierKeys::shiftModifier);
-    addAndMakeVisible(label); addAndMakeVisible(slider);
+    availability.setFont(juce::FontOptions(12.0f));
+    availability.setJustificationType(juce::Justification::centred);
+    availability.setColour(juce::Label::textColourId,juce::Colour(0xffb9c9db));
+    addAndMakeVisible(label); addAndMakeVisible(slider); addChildComponent(availability);
 }
 void CSynthEditor::Knob::bind(juce::AudioProcessorValueTreeState& state, const juce::String& id)
 {
@@ -21,9 +24,21 @@ void CSynthEditor::Knob::bind(juce::AudioProcessorValueTreeState& state, const j
         slider.valueFromTextFunction=[](const juce::String& text) { return text.equalsIgnoreCase("Off") ? 0.0 : text.getDoubleValue(); };
     }
 }
+void CSynthEditor::Knob::setAvailability(const juce::String& reason, const juce::String& explanation)
+{
+    slider.setEnabled(reason.isEmpty());
+    availability.setText(reason,juce::dontSendNotification);
+    auto tooltip=explanation.isEmpty() ? reason : explanation;
+    label.setTooltip(tooltip); availability.setTooltip(tooltip); slider.setTooltip(tooltip);
+    if (availability.isVisible()!=reason.isNotEmpty()) {
+        availability.setVisible(reason.isNotEmpty()); resized();
+    }
+}
 void CSynthEditor::Knob::resized()
 {
-    auto area=getLocalBounds(); label.setBounds(area.removeFromTop(22)); slider.setBounds(area);
+    auto area=getLocalBounds(); label.setBounds(area.removeFromTop(22));
+    if (availability.isVisible()) availability.setBounds(area.removeFromBottom(18));
+    slider.setBounds(area);
 }
 CSynthEditor::CSynthEditor(CSynthProcessor& p)
     : AudioProcessorEditor(p), synthProcessor(p), keyboard(p.keyboard,juce::MidiKeyboardComponent::horizontalKeyboard)
@@ -36,7 +51,7 @@ CSynthEditor::CSynthEditor(CSynthProcessor& p)
     look.setColour(juce::TextButton::buttonColourId,juce::Colour(0xff253247));
     setLookAndFeel(&look);
     for (auto* component : std::initializer_list<juce::Component*>{&presets,&previous,&next,&import,&exportSound,&release,
-            &layer,&op,&waveform,&envelope,&layerLabel,&operatorLabel,&status,&keyboard}) addAndMakeVisible(component);
+            &layer,&op,&waveform,&envelope,&layerLabel,&operatorLabel,&status,&envelopeAvailability,&keyboard}) addAndMakeVisible(component);
     for (int i=0;i<SYNTH_PRESET_COUNT;++i) presets.addItem(synthPresetName(i),i+1);
     presets.setTextWhenNothingSelected("Custom sound");
     presets.onChange=[this] { if (presets.getSelectedId()>0) synthProcessor.setCurrentProgram(presets.getSelectedId()-1); };
@@ -68,6 +83,8 @@ CSynthEditor::CSynthEditor(CSynthProcessor& p)
     for (int i=0;i<10;++i) make(operatorKnobs,opNames[i],opUnits[i]);
     layerLabel.setText("Edit layer",juce::dontSendNotification); operatorLabel.setText("Edit operator",juce::dontSendNotification);
     status.setFont(juce::FontOptions(13.0f));
+    envelopeAvailability.setFont(juce::FontOptions(12.0f));
+    envelopeAvailability.setColour(juce::Label::textColourId,juce::Colour(0xffb9c9db));
     keyboard.setAvailableRange(36,96); keyboard.setLowestVisibleKey(48); keyboard.setWantsKeyboardFocus(false);
     bindSelection();
     setResizable(true,true); setResizeLimits(1000,780,1600,1100); setSize(1180,880);
@@ -98,10 +115,25 @@ void CSynthEditor::timerCallback()
     auto config=synthProcessor.readConfig(); int l=layer.getSelectedId()-1, o=op.getSelectedId()-1;
     bool modulator=o<config.layers[l].fm.operatorCount-1;
     int mode=config.layers[l].fm.operators[o].indexMode;
-    operatorKnobs[1]->setEnabled(modulator); envelope.setEnabled(modulator);
-    operatorKnobs[5]->setEnabled(modulator && mode==FM_INDEX_DECAY);
-    for (int i=6;i<10;++i) operatorKnobs[static_cast<std::size_t>(i)]->setEnabled(modulator && mode==FM_INDEX_ADSR);
-    operatorKnobs[2]->setEnabled(config.layers[l].fm.operators[o].waveform==WAVE_PULSE);
+    const bool carrier=o==config.layers[l].fm.operatorCount-1;
+    const juce::String roleReason=modulator ? "" : carrier ? "Carrier: select a modulator" : "Inactive: add more operators";
+    const juce::String roleHelp=modulator ? "" : carrier
+        ? "This operator is the carrier: it produces the layer's audio. FM depth and index envelopes only apply to modulators. Select an earlier operator, or increase Active operators to make this one a modulator. Use master ADSR to shape output volume."
+        : "This operator is outside the active chain. Increase Active operators beyond this operator's number to make it a modulator, then edit its FM depth and index envelope.";
+    operatorKnobs[1]->setAvailability(roleReason,roleHelp);
+    envelope.setEnabled(modulator);
+    envelope.setTooltip(modulator ? "Modulator envelopes shape timbre. Master ADSR controls volume." : roleHelp);
+    envelopeAvailability.setText(modulator ? "Index envelope shapes FM depth; master ADSR shapes volume."
+        : carrier ? "Carrier: FM depth and index envelopes apply only to modulators."
+                  : "Inactive operator: increase Active operators to enable modulation.",juce::dontSendNotification);
+    envelopeAvailability.setTooltip(roleHelp);
+    operatorKnobs[5]->setAvailability(!modulator ? roleReason : mode==FM_INDEX_DECAY ? "" : "Choose Decay mode",
+        !modulator ? roleHelp : mode==FM_INDEX_DECAY ? "" : "Index decay rate is used only in Decay mode. Choose Decay in the index-envelope menu above.");
+    for (int i=6;i<10;++i) operatorKnobs[static_cast<std::size_t>(i)]->setAvailability(
+        !modulator ? roleReason : mode==FM_INDEX_ADSR ? "" : "Choose ADSR mode",
+        !modulator ? roleHelp : mode==FM_INDEX_ADSR ? "" : "Index ADSR controls are used only in ADSR mode. Choose ADSR in the index-envelope menu above. Master ADSR remains available for output volume.");
+    operatorKnobs[2]->setAvailability(config.layers[l].fm.operators[o].waveform==WAVE_PULSE ? "" : "Choose Pulse waveform",
+        config.layers[l].fm.operators[o].waveform==WAVE_PULSE ? "" : "Pulse width is used only by the Pulse waveform. Choose Pulse in the waveform menu above.");
     bool active=l<config.layerCount && o<config.layers[l].fm.operatorCount;
     status.setText(!synthProcessor.engineReady() ? "Audio engine isn't running. In Standalone, choose an audio output in Options." :
         active ? "Layer/operator selection changes what you edit. Last active operator = carrier. Shift-drag for fine control." :
@@ -162,6 +194,7 @@ void CSynthEditor::resized()
     place(operatorLabel,435,335,100,30); place(op,540,335,155,30);
     for (int i=0;i<4;++i) place(*layerKnobs[static_cast<std::size_t>(i)],20+i*285,374,265,96);
     place(waveform,220,487,200,30); place(envelope,450,487,200,30);
-    for (int i=0;i<10;++i) place(*operatorKnobs[static_cast<std::size_t>(i)],20+(i%5)*228,526+(i/5)*112,215,100);
+    place(envelopeAvailability,665,487,495,30);
+    for (int i=0;i<10;++i) place(*operatorKnobs[static_cast<std::size_t>(i)],20+(i%5)*228,526+(i/5)*112,215,112);
     place(status,20,755,1140,32); place(keyboard,20,796,1140,70);
 }
