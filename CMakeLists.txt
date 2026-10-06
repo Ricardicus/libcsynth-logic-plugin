@@ -19,6 +19,8 @@ endif()
 set(CSYNTH_BUILD_TESTS OFF CACHE BOOL "Build libcsynth's own tests" FORCE)
 set(CSYNTH_BUILD_EXAMPLES OFF CACHE BOOL "Build libcsynth examples" FORCE)
 add_subdirectory("${CSYNTH_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/libcsynth")
+# Whole/dotted whole notes at slow tempos need more than the default two seconds.
+target_compile_definitions(csynth PUBLIC CSYNTH_ECHO_MAX_DELAY_MS=30000)
 
 FetchContent_Declare(JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git

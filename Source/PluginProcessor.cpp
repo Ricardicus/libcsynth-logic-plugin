@@ -1,6 +1,7 @@
 #include <cstring>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "EchoTiming.h"
 #include <cmath>
 #include <limits>
 
@@ -11,6 +12,8 @@ CSynthProcessor::CSynthProcessor()
     for (const auto& spec : parameters::specs()) values.push_back(state.getRawParameterValue(spec.id));
     lastValues.resize(values.size(),std::numeric_limits<float>::quiet_NaN());
     outputGain = state.getRawParameterValue("gain");
+    echoTimingParameter = state.getRawParameterValue("echoTiming");
+    freeEchoDelay = state.getRawParameterValue("echoDelay");
 }
 CSynthProcessor::~CSynthProcessor() { releaseResources(); }
 SynthConfig CSynthProcessor::readConfig() const
@@ -29,6 +32,8 @@ void CSynthProcessor::applyConfig(const SynthConfig& config, int factoryIndex)
         param->setValueNotifyingHost(param->convertTo0to1(juce::jlimit(s.minimum,s.maximum,static_cast<float>(s.read(config)))));
         param->endChangeGesture();
     }
+    auto* timing=state.getParameter("echoTiming");
+    timing->beginChangeGesture(); timing->setValueNotifyingHost(0); timing->endChangeGesture();
     selectedPreset.store(factoryIndex);
 }
 void CSynthProcessor::setCurrentProgram(int index)
@@ -44,7 +49,9 @@ void CSynthProcessor::prepareToPlay(double rate, int)
     clearMidi();
     spectrumTap.sampleRate.store(rate,std::memory_order_relaxed);
     auto config=readConfig();
+    config.effects.echoDelayMs=effectiveEchoDelayMs();
     engine.reset(synthCreate(juce::roundToInt(rate),&config));
+    appliedEchoDelay=-1;
     ready.store(engine!=nullptr);
     std::fill(lastValues.begin(),lastValues.end(),std::numeric_limits<float>::quiet_NaN());
     gain.reset(rate,.02);
@@ -72,7 +79,12 @@ void CSynthProcessor::updatePatch()
         float value=values[i]->load();
         if (std::memcmp(&lastValues[i], &value, sizeof(value))!=0) { changed=true; lastValues[i]=value; }
     }
-    if (changed && engine) { auto config=readConfig(); synthConfigure(engine.get(),&config); }
+    double delay=effectiveEchoDelayMs();
+    if (std::abs(appliedEchoDelay-delay)>.0001) changed=true;
+    if (changed && engine) {
+        auto config=readConfig(); config.effects.echoDelayMs=delay;
+        synthConfigure(engine.get(),&config); appliedEchoDelay=delay;
+    }
     gain.setTargetValue(juce::Decibels::decibelsToGain(outputGain->load()));
 }
 void CSynthProcessor::syncNote(int note)
@@ -132,6 +144,10 @@ void CSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
     buffer.clear();
     if (!engine || buffer.getNumChannels()==0) return;
     if (releaseRequested.exchange(false)) { reset(); keyboard.reset(); }
+    if (auto* playHead=getPlayHead())
+        if (auto position=playHead->getPosition())
+            if (auto bpm=position->getBpm())
+                if (std::isfinite(*bpm) && *bpm>0) { tempo.store(*bpm); tempoReceived.store(true); }
     updatePatch();
     keyboard.processNextMidiBuffer(midi,0,buffer.getNumSamples(),true);
     int position=0;
@@ -145,11 +161,17 @@ void CSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
     spectrumTap.push(buffer.getReadPointer(0),buffer.getNumSamples());
     midi.clear();
 }
+double CSynthProcessor::effectiveEchoDelayMs() const
+{
+    return juce::jlimit(1.0,static_cast<double>(CSYNTH_ECHO_MAX_DELAY_MS),
+        echoTiming::milliseconds(juce::roundToInt(echoTimingParameter->load()),tempo.load(),
+                                 freeEchoDelay->load()));
+}
 double CSynthProcessor::getTailLengthSeconds() const
 {
     auto sound=readConfig();
     auto repeats=[](double feedback) { return feedback<=0 ? 1.0 : std::ceil(std::log(.001)/std::log(feedback)); };
-    double echo=sound.effects.echoMix>0 ? sound.effects.echoDelayMs*.001*repeats(sound.effects.echoFeedback) : 0;
+    double echo=sound.effects.echoMix>0 ? effectiveEchoDelayMs()*.001*repeats(sound.effects.echoFeedback) : 0;
     double reverb=sound.effects.reverbMix>0 ? .054*repeats(sound.effects.reverbRoom) : 0;
     return sound.outputEnvelope.releaseMs*.001+echo+reverb;
 }
@@ -169,6 +191,10 @@ void CSynthProcessor::setStateInformation(const void* data, int size)
     if (static_cast<int>(tree.getProperty("schema",0))!=1) return;
     int preset=static_cast<int>(tree.getProperty("factory",-1));
     selectedPreset.store(preset>=0 && preset<SYNTH_PRESET_COUNT ? preset : -1);
+    if (!tree.getChildWithProperty("id","echoTiming").isValid()) {
+        juce::ValueTree timing{"PARAM"}; timing.setProperty("id","echoTiming",nullptr);
+        timing.setProperty("value",0,nullptr); tree.addChild(timing,-1,nullptr);
+    }
     state.replaceState(tree);
 }
 juce::AudioProcessorEditor* CSynthProcessor::createEditor() { return new CSynthEditor(*this); }

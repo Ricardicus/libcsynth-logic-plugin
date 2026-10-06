@@ -24,15 +24,16 @@ private:
     void showPage(int page);
     CSynthProcessor& synthProcessor;
     juce::LookAndFeel_V4 look;
-    juce::ComboBox presets, layer, op, waveform, envelope;
+    juce::ComboBox presets, layer, op, waveform, envelope, echoTiming;
     juce::TextButton previous{"<"}, next{">"}, import{"Import .synth"}, exportSound{"Export .synth"}, release{"Release notes"};
-    juce::Label layerLabel, operatorLabel, status, envelopeAvailability;
-    juce::TextButton synthTab{"Synth"}, outputTab{"Output & filters"}, effectsTab{"Effects"};
+    juce::Label layerLabel, operatorLabel, status, envelopeAvailability, echoTimingInfo;
+    juce::TextButton synthTab{"Synth"}, outputTab{"Output & filters"}, effectsTab{"Effects"}, keyboardTab{"Keyboard"};
+    juce::MidiKeyboardComponent keyboard;
     int currentPage=0;
     OutputSpectrogram spectrogram;
     juce::TooltipWindow tooltips{this,500};
     std::vector<std::unique_ptr<Knob>> globalKnobs, effectKnobs, layerKnobs, operatorKnobs;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> waveAttachment, envelopeAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> waveAttachment, envelopeAttachment, echoTimingAttachment;
     std::unique_ptr<juce::FileChooser> chooser;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CSynthEditor)
 };

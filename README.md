@@ -175,7 +175,8 @@ and factory presets are compiled into the component.
 4. Choose **AU Instruments → Ricardicus → CSynth → Stereo**. Some Logic versions
    call the Audio Unit submenu **Audio Units**. A mono option is available too.
 5. Select the track, play your MIDI keyboard, or open Logic's Musical Typing with
-   **Command-K**. CSynth follows MIDI from Logic’s selected instrument track.
+   **Command-K**. CSynth follows MIDI from Logic’s selected instrument track; its Keyboard tab
+   also lets you test sounds with the mouse.
 6. Pick a factory preset. Try Flute Concert, Keys Tine EP, Bass Rubber FM,
    Pad Aurora, or Bell Singing Bowl.
 
@@ -223,11 +224,16 @@ or unrelated plugin caches as part of this project's installation.
 
 ## Working with the controls
 
-The editor is 1,180 × 700 by default and has three tabs: **Synth** for layers
+The editor is 1,180 × 700 by default and has four tabs: **Synth** for layers
 and operators, **Output & filters** for master ADSR, filters, and gain, and
-**Effects** for echo and reverb. Presets and the live spectrogram stay visible
+**Effects** for echo and reverb, and **Keyboard** for testing sounds with the mouse.
+Presets and the live spectrogram stay visible
 on every tab. Switching tabs preserves your edits and does not interrupt audio.
-There is no on-screen keyboard; use MIDI from Logic or Musical Typing.
+![Keyboard tab](docs/keyboard.png)
+
+On Keyboard, click or drag across the piano to play. Switching away releases
+notes held by the on-screen keyboard. MIDI from Logic and Musical Typing work
+on every tab.
 
 The top row chooses a **complete factory patch**. Its arrows wrap at either end.
 Factory selection replaces the synth settings while preserving the Output gain.
@@ -262,6 +268,28 @@ mode. The carrier has no FM depth or index envelope; select an earlier operator
 or increase Active operators to make it a modulator. Hover a control’s label or
 reason for the full explanation. These hints update when you change the selected
 operator, waveform, envelope mode, or preset.
+
+![Echo timing controls](docs/effects.png)
+
+On the Effects tab, **Echo timing** offers **Free (ms)** plus 1/32, 1/16, 1/8,
+1/4, 1/2, and whole-note divisions, each straight, dotted, or triplet. Synced
+notes follow the project tempo, including tempo changes. A dotted note is 1.5
+times the straight length; a triplet is two-thirds. At 120 BPM, a quarter note
+is 500 ms and a dotted eighth is 375 ms. These are note values, not fractions
+of a bar, so a quarter stays a quarter when the time signature changes.
+
+Free mode keeps the existing 1–2,000 ms knob. In sync mode that knob shows why
+it is disabled, and the readout beside the menu shows the actual delay and tempo.
+Switching back to Free restores the millisecond value you left there. Without
+host tempo, sync starts at 120 BPM; once a valid tempo arrives, the last valid
+value is retained if the host stops reporting it. Delays are limited to 1 ms–30
+seconds, with a visible limit notice when necessary. Changes are smoothed and
+may briefly bend the pitch of an existing echo tail.
+
+Echo timing is automatable and saved in Logic projects/plugin settings. Older
+project states open in Free mode. Factory presets and `.synth` imports select
+Free; `.synth` export stores the free millisecond patch, since the shared format
+has no host-tempo division field. Use Logic settings to preserve sync mode.
 
 The live spectrogram shows the final signal after filters, effects, and output
 gain. Time runs left to right (newest at the right), frequency runs bottom to
@@ -330,7 +358,7 @@ open build/CSynth_artefacts/Release/Standalone/CSynth.app
 ```
 
 Choose an audio output and MIDI input in its Options/settings panel. Play a MIDI
-keyboard. This is a convenient way to check the
+keyboard, or click the piano on the Keyboard tab. This is a convenient way to check the
 synth without waiting for Logic's plugin scan. The app doesn't need SDL.
 
 ## Development and tests
@@ -398,3 +426,10 @@ state. The AU and standalone bundles also passed `codesign --verify --deep
 --strict`. The editor screenshot above comes from that build. Logic itself
 still needs the installation and manual check described above; the automated
 test does not replace Logic’s scan or `auval`.
+
+The plugin build defines `CSYNTH_ECHO_MAX_DELAY_MS=30000` for libcsynth and
+its clients. This uses about 5.8 MB for the echo buffer at 48 kHz, allocated
+once when the engine starts. The submodule contains the small capacity-option
+change required for this; commit/publish those library changes before sharing
+an updated submodule pointer with another checkout. Ordinary library builds
+still default to 2,000 ms.

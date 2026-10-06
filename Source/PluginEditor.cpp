@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "EchoTiming.h"
 
 CSynthEditor::Knob::Knob(const juce::String& name, const juce::String& suffix)
 {
@@ -42,7 +43,7 @@ void CSynthEditor::Knob::resized()
     slider.setBounds(area);
 }
 CSynthEditor::CSynthEditor(CSynthProcessor& p)
-    : AudioProcessorEditor(p), synthProcessor(p), spectrogram(p.spectrumTap)
+    : AudioProcessorEditor(p), synthProcessor(p), keyboard(p.keyboard,juce::MidiKeyboardComponent::horizontalKeyboard), spectrogram(p.spectrumTap)
 {
     look.setColour(juce::ResizableWindow::backgroundColourId,juce::Colour(0xff101722));
     look.setColour(juce::Slider::rotarySliderFillColourId,juce::Colour(0xff47c8c0));
@@ -53,13 +54,16 @@ CSynthEditor::CSynthEditor(CSynthProcessor& p)
     look.setColour(juce::TextButton::buttonOnColourId,juce::Colour(0xff21666d));
     setLookAndFeel(&look);
     for (auto* component : std::initializer_list<juce::Component*>{&presets,&previous,&next,&import,&exportSound,&release,
-            &layer,&op,&waveform,&envelope,&layerLabel,&operatorLabel,&status,&envelopeAvailability,&spectrogram,&synthTab,&outputTab,&effectsTab}) addAndMakeVisible(component);
-    for (auto* tab : {&synthTab,&outputTab,&effectsTab}) {
+            &layer,&op,&waveform,&envelope,&layerLabel,&operatorLabel,&status,&envelopeAvailability,&spectrogram,&echoTiming,&echoTimingInfo,&synthTab,&outputTab,&effectsTab,&keyboardTab,&keyboard}) addAndMakeVisible(component);
+    for (auto* tab : {&synthTab,&outputTab,&effectsTab,&keyboardTab}) {
         tab->setClickingTogglesState(true); tab->setRadioGroupId(1);
     }
     synthTab.onClick=[this] { showPage(0); };
     outputTab.onClick=[this] { showPage(1); };
     effectsTab.onClick=[this] { showPage(2); };
+    keyboardTab.onClick=[this] { showPage(3); };
+    keyboard.setAvailableRange(36,96); keyboard.setLowestVisibleKey(36);
+    keyboard.setVelocity(.8f,false); keyboard.setWantsKeyboardFocus(false); keyboard.clearKeyMappings();
     for (int i=0;i<SYNTH_PRESET_COUNT;++i) presets.addItem(synthPresetName(i),i+1);
     presets.setTextWhenNothingSelected("Custom sound");
     presets.onChange=[this] { if (presets.getSelectedId()>0) synthProcessor.setCurrentProgram(presets.getSelectedId()-1); };
@@ -72,6 +76,11 @@ CSynthEditor::CSynthEditor(CSynthProcessor& p)
     layer.onChange=[this] { bindSelection(); }; op.onChange=[this] { bindSelection(); };
     waveform.addItemList({"Sine","Square","Triangle","Saw","Pulse","Noise"},1);
     envelope.addItemList({"Sustain","Decay","ADSR"},1);
+    echoTiming.setName("Echo timing");
+    echoTiming.addItemList(echoTiming::choices(),1);
+    echoTiming.setTooltip("Free uses milliseconds. Note divisions follow Logic's tempo; dotted notes last 1.5 times as long, triplets two-thirds as long.");
+    echoTimingAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.state,"echoTiming",echoTiming);
+    echoTimingInfo.setFont(juce::FontOptions(13.0f));
     waveform.setTooltip("Waveform of the selected operator. The last active operator is the carrier.");
     envelope.setTooltip("Modulator envelopes shape timbre. Master ADSR controls volume.");
     auto make=[this](auto& list,const char* label,const char* suffix) {
@@ -89,6 +98,7 @@ CSynthEditor::CSynthEditor(CSynthProcessor& p)
     const char* opNames[]={"Ratio","FM depth","Pulse width","Vibrato rate","Vibrato depth","Index decay rate","Index attack","Index decay","Index sustain","Index release"};
     const char* opUnits[]={"","",""," Hz"," cents"," /s"," ms"," ms"," %"," ms"};
     for (int i=0;i<10;++i) make(operatorKnobs,opNames[i],opUnits[i]);
+    echoTiming.onChange=[this] { timerCallback(); };
     layerLabel.setText("Edit layer",juce::dontSendNotification); operatorLabel.setText("Edit operator",juce::dontSendNotification);
     status.setFont(juce::FontOptions(13.0f));
     envelopeAvailability.setFont(juce::FontOptions(12.0f));
@@ -100,7 +110,7 @@ CSynthEditor::CSynthEditor(CSynthProcessor& p)
 }
 CSynthEditor::~CSynthEditor()
 {
-    stopTimer(); waveAttachment.reset(); envelopeAttachment.reset();
+    stopTimer(); keyboard.clearKeyMappings(); waveAttachment.reset(); envelopeAttachment.reset(); echoTimingAttachment.reset();
     globalKnobs.clear(); effectKnobs.clear(); layerKnobs.clear(); operatorKnobs.clear();
     setLookAndFeel(nullptr);
 }
@@ -142,6 +152,15 @@ void CSynthEditor::timerCallback()
         !modulator ? roleHelp : mode==FM_INDEX_ADSR ? "" : "Index ADSR controls are used only in ADSR mode. Choose ADSR in the index-envelope menu above. Master ADSR remains available for output volume.");
     operatorKnobs[2]->setAvailability(config.layers[l].fm.operators[o].waveform==WAVE_PULSE ? "" : "Choose Pulse waveform",
         config.layers[l].fm.operators[o].waveform==WAVE_PULSE ? "" : "Pulse width is used only by the Pulse waveform. Choose Pulse in the waveform menu above.");
+    int timing=juce::roundToInt(synthProcessor.state.getRawParameterValue("echoTiming")->load());
+    effectKnobs[1]->setAvailability(timing==0 ? "" : "Tempo sync: choose Free",
+        timing==0 ? "" : "The note division determines delay time from project tempo. Choose Free (ms) to edit this knob; its value is preserved while synced.");
+    double bpm=synthProcessor.echoTempo();
+    double requested=echoTiming::milliseconds(timing,bpm,config.effects.echoDelayMs);
+    echoTimingInfo.setText(timing==0 ? "Free delay: "+juce::String(config.effects.echoDelayMs,0)+" ms"
+        : juce::String(synthProcessor.effectiveEchoDelayMs(),1)+" ms / "+juce::String(bpm,1)+" BPM"
+          +(synthProcessor.hasEchoTempo() ? "" : " (fallback)")
+          +(requested>CSYNTH_ECHO_MAX_DELAY_MS ? " / 30 s limit" : requested<1 ? " / 1 ms limit" : ""),juce::dontSendNotification);
     bool active=l<config.layerCount && o<config.layers[l].fm.operatorCount;
     status.setText(!synthProcessor.engineReady() ? "Audio engine isn't running. In Standalone, choose an audio output in Options." :
         active ? "Layer/operator selection changes what you edit. Last active operator = carrier. Shift-drag for fine control." :
@@ -174,12 +193,16 @@ void CSynthEditor::chooseFile(bool importing)
 }
 void CSynthEditor::showPage(int page)
 {
+    if (currentPage==3 && page!=3) keyboard.clearKeyMappings();
     currentPage=page;
+    keyboard.setVisible(page==3);
+    keyboardTab.setToggleState(page==3,juce::dontSendNotification);
     synthTab.setToggleState(page==0,juce::dontSendNotification);
     outputTab.setToggleState(page==1,juce::dontSendNotification);
     effectsTab.setToggleState(page==2,juce::dontSendNotification);
     for (auto& knob : globalKnobs) knob->setVisible(page==1);
     for (auto& knob : effectKnobs) knob->setVisible(page==2);
+    echoTiming.setVisible(page==2); echoTimingInfo.setVisible(page==2);
     for (auto& knob : layerKnobs) knob->setVisible(page==0);
     for (auto& knob : operatorKnobs) knob->setVisible(page==0);
     for (auto* component : std::initializer_list<juce::Component*>{&layer,&op,&waveform,&envelope,&layerLabel,&operatorLabel,&envelopeAvailability})
@@ -206,6 +229,10 @@ void CSynthEditor::paint(juce::Graphics& g)
         g.drawText("REVERB",20,295,500,22,juce::Justification::centredLeft);
         g.drawText("Raise Echo mix or Reverb mix to hear the effect. Changes apply while playing.",20,470,1140,25,juce::Justification::centredLeft);
     }
+    if (currentPage==3) {
+        g.drawText("PLAY WITH THE MOUSE",20,130,500,22,juce::Justification::centredLeft);
+        g.drawText("Click or drag across the keys to test your sound. MIDI from Logic works on every tab.",20,340,1140,25,juce::Justification::centredLeft);
+    }
     g.setColour(juce::Colour(0xff29374a));
     for (int y : {78,120,540}) g.drawHorizontalLine(y,20,1160);
 }
@@ -217,7 +244,9 @@ void CSynthEditor::resized()
     };
     place(presets,240,26,330,34); place(previous,580,26,36,34); place(next,622,26,36,34);
     place(import,675,26,140,34); place(exportSound,825,26,140,34); place(release,980,26,180,34);
-    place(synthTab,20,85,150,30); place(outputTab,180,85,180,30); place(effectsTab,370,85,150,30);
+    place(echoTiming,300,126,235,30); place(echoTimingInfo,545,126,615,30);
+    place(synthTab,20,85,150,30); place(outputTab,180,85,180,30); place(effectsTab,370,85,150,30); place(keyboardTab,530,85,150,30);
+    place(keyboard,20,180,1140,140); keyboard.setKeyWidth(keyboard.getWidth()/36.0f);
     for (int i=0;i<4;++i) place(*globalKnobs[static_cast<std::size_t>(i)],20+i*285,160,265,120);
     for (int i=4;i<7;++i) place(*globalKnobs[static_cast<std::size_t>(i)],20+(i-4)*380,325,360,120);
     for (int i=0;i<6;++i) place(*effectKnobs[static_cast<std::size_t>(i)],20+(i%3)*380,160+(i/3)*165,360,120);

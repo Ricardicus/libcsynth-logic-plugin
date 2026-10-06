@@ -1,5 +1,9 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "EchoTiming.h"
+extern "C" {
+#include "effects.h"
+}
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -17,10 +21,50 @@ static double energy(const juce::AudioBuffer<float>& b, int start=0, int count=-
     for(int i=start;i<start+count;++i) { double x=b.getSample(0,i); CHECK(std::isfinite(x)); result+=x*x; }
     return result;
 }
+struct TestPlayHead : juce::AudioPlayHead {
+    PositionInfo position;
+    juce::Optional<PositionInfo> getPosition() const override { return position; }
+};
 int main()
 {
     juce::ScopedJuceInitialiser_GUI init;
     try {
+        CHECK(std::abs(echoTiming::milliseconds(1,120,213)-62.5)<.001);
+        CHECK(std::abs(echoTiming::milliseconds(8,120,213)-375)<.001);
+        CHECK(std::abs(echoTiming::milliseconds(11,120,213)-750)<.001);
+        CHECK(std::abs(echoTiming::milliseconds(12,120,213)-1000.0/3)<.001);
+        CHECK(std::abs(echoTiming::milliseconds(17,60,213)-6000)<.001);
+        CSynthProcessor timed;
+        set(timed,"echoDelay",213); set(timed,"echoTiming",8);
+        CHECK(!timed.hasEchoTempo()); CHECK(std::abs(timed.effectiveEchoDelayMs()-375)<.001);
+        TestPlayHead host; host.position.setBpm(60); host.position.setTimeSignature(juce::AudioPlayHead::TimeSignature{6,8});
+        timed.setPlayHead(&host); timed.prepareToPlay(48000,512);
+        juce::AudioBuffer<float> silence(2,512); juce::MidiBuffer events;
+        timed.processBlock(silence,events); CHECK(timed.hasEchoTempo());
+        CHECK(std::abs(timed.effectiveEchoDelayMs()-750)<.001);
+        host.position.setBpm(120); timed.processBlock(silence,events);
+        CHECK(std::abs(timed.effectiveEchoDelayMs()-375)<.001);
+        set(timed,"echoTiming",17); host.position.setBpm(60); timed.processBlock(silence,events);
+        CHECK(std::abs(timed.effectiveEchoDelayMs()-6000)<.001);
+        host.position.setBpm(10); timed.processBlock(silence,events);
+        CHECK(std::abs(timed.effectiveEchoDelayMs()-30000)<.001);
+        juce::MemoryBlock synced; timed.getStateInformation(synced);
+        CSynthProcessor restored; restored.setStateInformation(synced.getData(),static_cast<int>(synced.getSize()));
+        CHECK(juce::roundToInt(restored.state.getRawParameterValue("echoTiming")->load())==17);
+        set(timed,"echoTiming",0); timed.processBlock(silence,events);
+        CHECK(std::abs(timed.effectiveEchoDelayMs()-213)<.001);
+        auto oldState=timed.state.copyState(); oldState.setProperty("schema",1,nullptr);
+        oldState.removeChild(oldState.getChildWithProperty("id","echoTiming"),nullptr);
+        juce::MemoryBlock legacy; juce::AudioProcessor::copyXmlToBinary(*oldState.createXml(),legacy);
+        restored.setStateInformation(legacy.getData(),static_cast<int>(legacy.getSize()));
+        CHECK(juce::roundToInt(restored.state.getRawParameterValue("echoTiming")->load())==0);
+        SynthEffects longEcho{}; auto fx=synthDefaultConfig().effects;
+        fx.echoMix=1; fx.echoFeedback=0; fx.reverbMix=0; fx.echoDelayMs=CSYNTH_ECHO_MAX_DELAY_MS;
+        CHECK(effectsInit(&longEcho,1000,fx)==0);
+        for (int i=0;i<=CSYNTH_ECHO_MAX_DELAY_MS;++i)
+            CHECK(std::abs(effectsNext(&longEcho,i==0 ? 1.0f : 0.0f)-(i==0 || i==CSYNTH_ECHO_MAX_DELAY_MS ? 1.0f : 0.0f))<1.e-6f);
+        effectsDestroy(&longEcho);
+        timed.setPlayHead(nullptr); timed.releaseResources();
         SpectrumTap queue;
         std::array<float,512> captured{};
         captured.fill(.25f);
@@ -99,14 +143,44 @@ int main()
             CHECK(juce::PNGImageFormat().writeImageToStream(snapshot,output));
         }
         CHECK(editor->getHeight()==700);
-        for (const auto& pageName : {"Output & filters","Effects","Synth"}) {
+        for (const auto& pageName : {"Output & filters","Effects","Keyboard","Synth"}) {
             bool selected=false;
             for (auto* child : editor->getChildren())
                 if (auto* button=dynamic_cast<juce::TextButton*>(child))
                     if (button->getButtonText()==pageName) { button->onClick(); CHECK(button->getToggleState()); selected=true; }
             CHECK(selected);
+            if (juce::String(pageName)=="Effects") {
+                for (auto* child : editor->getChildren())
+                    if (auto* combo=dynamic_cast<juce::ComboBox*>(child))
+                        if (combo->getName()=="Echo timing") {
+                            combo->setSelectedId(9,juce::sendNotificationSync);
+                            CHECK(juce::roundToInt(a.state.getRawParameterValue("echoTiming")->load())==8);
+                            for (auto* knob : editor->getChildren())
+                                if (knob->getName()=="Echo delay")
+                                    for (auto* control : knob->getChildren())
+                                        if (auto* slider=dynamic_cast<juce::Slider*>(control)) CHECK(!slider->isEnabled());
+                        }
+                juce::Thread::sleep(80); juce::Timer::callPendingTimersSynchronously();
+                if (auto* path=std::getenv("CSYNTH_EDITOR_CAPTURE")) {
+                    auto image=editor->createComponentSnapshot(editor->getLocalBounds());
+                    auto file=juce::File(path).getSiblingFile("csynth-effects.png");
+                    juce::FileOutputStream output{file}; CHECK(output.openedOk()); output.setPosition(0); output.truncate();
+                    CHECK(juce::PNGImageFormat().writeImageToStream(image,output));
+                }
+                set(a,"echoTiming",0);
+            }
+            if (juce::String(pageName)=="Keyboard") {
+                a.keyboard.noteOn(1,72,.8f); a.processBlock(buffer,midi); CHECK(energy(buffer)>0);
+                a.keyboard.noteOff(1,72,0); a.processBlock(buffer,midi);
+                if (auto* path=std::getenv("CSYNTH_EDITOR_CAPTURE")) {
+                    auto image=editor->createComponentSnapshot(editor->getLocalBounds());
+                    juce::FileOutputStream output{juce::File(path).getSiblingFile("csynth-keyboard.png")};
+                    CHECK(output.openedOk()); output.setPosition(0); output.truncate();
+                    CHECK(juce::PNGImageFormat().writeImageToStream(image,output));
+                }
+            }
             for (auto* child : editor->getChildren()) {
-                CHECK(dynamic_cast<juce::MidiKeyboardComponent*>(child)==nullptr);
+                if (dynamic_cast<juce::MidiKeyboardComponent*>(child)!=nullptr) CHECK(child->isVisible()==(juce::String(pageName)=="Keyboard"));
                 if (child->isVisible()) CHECK(editor->getLocalBounds().contains(child->getBounds()));
                 if (child->getName()=="Low-pass") CHECK(child->isVisible()==(juce::String(pageName)=="Output & filters"));
                 if (child->getName()=="Echo mix") CHECK(child->isVisible()==(juce::String(pageName)=="Effects"));

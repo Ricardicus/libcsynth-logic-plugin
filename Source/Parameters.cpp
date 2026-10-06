@@ -1,4 +1,5 @@
 #include "Parameters.h"
+#include "EchoTiming.h"
 #include <cmath>
 
 namespace parameters {
@@ -104,6 +105,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout layout()
     }
     result.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{"gain",1},"Output gain",
         juce::NormalisableRange<float>{-24,12,.1f},0));
+    result.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{"echoTiming",1},"Echo timing",echoTiming::choices(),0));
     return result;
 }
 }

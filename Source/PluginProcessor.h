@@ -30,6 +30,9 @@ public:
     void setStateInformation(const void*,int) override;
 
     SynthConfig readConfig() const;
+    double echoTempo() const { return tempo.load(); }
+    bool hasEchoTempo() const { return tempoReceived.load(); }
+    double effectiveEchoDelayMs() const;
     void applyConfig(const SynthConfig&, int factoryIndex = -1);
     int factorySelection() const { return selectedPreset.load(); }
     void releaseAllNotes() { releaseRequested.store(true); }
@@ -47,6 +50,11 @@ private:
     std::vector<std::atomic<float>*> values;
     std::vector<float> lastValues;
     std::atomic<float>* outputGain = nullptr;
+    std::atomic<float>* echoTimingParameter = nullptr;
+    std::atomic<float>* freeEchoDelay = nullptr;
+    std::atomic<double> tempo{120};
+    std::atomic<bool> tempoReceived{false};
+    double appliedEchoDelay=-1;
     juce::SmoothedValue<float> gain;
     std::array<std::array<bool,128>,16> down{}, latched{};
     std::array<std::array<int,128>,16> velocities{};
