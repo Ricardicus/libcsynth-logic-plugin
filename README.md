@@ -21,6 +21,7 @@ libcsynth renders the samples.
 - Change master ADSR, low-pass/high-pass cutoffs, echo, and reverb while playing.
 - Automate the sound controls in Logic. Each layer/operator has its own parameter
   IDs, even though the editor shows one selected slot at a time.
+- Watch the final output in a scrolling spectrogram visible on every tab.
 - Save a Logic project and get the whole edited patch back when you reopen it.
 - Import/export `.synth` files shared with the SDL app.
 
@@ -174,7 +175,7 @@ and factory presets are compiled into the component.
 4. Choose **AU Instruments → Ricardicus → CSynth → Stereo**. Some Logic versions
    call the Audio Unit submenu **Audio Units**. A mono option is available too.
 5. Select the track, play your MIDI keyboard, or open Logic's Musical Typing with
-   **Command-K**. You can also click the piano in the plugin window.
+   **Command-K**. CSynth follows MIDI from Logic’s selected instrument track.
 6. Pick a factory preset. Try Flute Concert, Keys Tine EP, Bass Rubber FM,
    Pad Aurora, or Bell Singing Bowl.
 
@@ -222,6 +223,12 @@ or unrelated plugin caches as part of this project's installation.
 
 ## Working with the controls
 
+The editor is 1,180 × 700 by default and has three tabs: **Synth** for layers
+and operators, **Output & filters** for master ADSR, filters, and gain, and
+**Effects** for echo and reverb. Presets and the live spectrogram stay visible
+on every tab. Switching tabs preserves your edits and does not interrupt audio.
+There is no on-screen keyboard; use MIDI from Logic or Musical Typing.
+
 The top row chooses a **complete factory patch**. Its arrows wrap at either end.
 Factory selection replaces the synth settings while preserving the Output gain.
 The name remains the last chosen factory preset when you edit it; your edits
@@ -255,6 +262,18 @@ mode. The carrier has no FM depth or index envelope; select an earlier operator
 or increase Active operators to make it a modulator. Hover a control’s label or
 reason for the full explanation. These hints update when you change the selected
 operator, waveform, envelope mode, or preset.
+
+The live spectrogram shows the final signal after filters, effects, and output
+gain. Time runs left to right (newest at the right), frequency runs bottom to
+top on a logarithmic scale, and brighter colours mean stronger frequency bins.
+The display spans 40 Hz to 20 kHz, capped by the current sample rate’s Nyquist
+frequency. Its 2,048-sample Hann-windowed FFT uses 50% overlap and a 30 Hz UI
+timer. At 48 kHz, the history covers about 10.9 seconds.
+
+The audio thread only copies samples into a fixed-size queue while an editor
+exists. FFTs and drawing run on the UI thread, and closing the editor disables
+capture. If the UI falls behind, visualization data is discarded; audio never
+waits for the display. The spectrogram is not stored with your patch.
 
 ## Saving sounds and projects
 
@@ -311,7 +330,7 @@ open build/CSynth_artefacts/Release/Standalone/CSynth.app
 ```
 
 Choose an audio output and MIDI input in its Options/settings panel. Play a MIDI
-keyboard or click the on-screen piano. This is a convenient way to check the
+keyboard. This is a convenient way to check the
 synth without waiting for Logic's plugin scan. The app doesn't need SDL.
 
 ## Development and tests

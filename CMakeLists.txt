@@ -48,7 +48,7 @@ target_include_directories(CSynth PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Source")
 target_compile_definitions(CSynth PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
 target_link_libraries(CSynth PRIVATE csynth::csynth
-    juce::juce_audio_utils juce::juce_audio_processors
+    juce::juce_audio_utils juce::juce_audio_processors juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 
 find_program(CSYNTH_CODESIGN codesign REQUIRED)
@@ -60,7 +60,7 @@ endforeach()
 
 if(BUILD_TESTING)
     add_executable(CSynthTests tests/ProcessorTests.cpp)
-    target_link_libraries(CSynthTests PRIVATE CSynth csynth::csynth juce::juce_audio_utils)
+    target_link_libraries(CSynthTests PRIVATE CSynth csynth::csynth juce::juce_audio_utils juce::juce_dsp)
     add_test(NAME processor COMMAND CSynthTests)
 
     add_executable(CSynthAUTest tests/AudioUnitTests.cpp)

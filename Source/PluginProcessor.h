@@ -1,5 +1,6 @@
 #pragma once
 #include "Parameters.h"
+#include "Spectrogram.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -35,6 +36,7 @@ public:
     bool engineReady() const { return ready.load(); }
     juce::AudioProcessorValueTreeState state;
     juce::MidiKeyboardState keyboard;
+    SpectrumTap spectrumTap;
 private:
     void updatePatch();
     void handleMidi(const juce::MidiMessage&);

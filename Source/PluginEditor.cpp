@@ -2,6 +2,7 @@
 
 CSynthEditor::Knob::Knob(const juce::String& name, const juce::String& suffix)
 {
+    setName(name);
     label.setText(name,juce::dontSendNotification);
     label.setJustificationType(juce::Justification::centred);
     label.setFont(juce::FontOptions(14.0f));
@@ -41,7 +42,7 @@ void CSynthEditor::Knob::resized()
     slider.setBounds(area);
 }
 CSynthEditor::CSynthEditor(CSynthProcessor& p)
-    : AudioProcessorEditor(p), synthProcessor(p), keyboard(p.keyboard,juce::MidiKeyboardComponent::horizontalKeyboard)
+    : AudioProcessorEditor(p), synthProcessor(p), spectrogram(p.spectrumTap)
 {
     look.setColour(juce::ResizableWindow::backgroundColourId,juce::Colour(0xff101722));
     look.setColour(juce::Slider::rotarySliderFillColourId,juce::Colour(0xff47c8c0));
@@ -49,9 +50,16 @@ CSynthEditor::CSynthEditor(CSynthProcessor& p)
     look.setColour(juce::Slider::textBoxOutlineColourId,juce::Colours::transparentBlack);
     look.setColour(juce::ComboBox::backgroundColourId,juce::Colour(0xff253247));
     look.setColour(juce::TextButton::buttonColourId,juce::Colour(0xff253247));
+    look.setColour(juce::TextButton::buttonOnColourId,juce::Colour(0xff21666d));
     setLookAndFeel(&look);
     for (auto* component : std::initializer_list<juce::Component*>{&presets,&previous,&next,&import,&exportSound,&release,
-            &layer,&op,&waveform,&envelope,&layerLabel,&operatorLabel,&status,&envelopeAvailability,&keyboard}) addAndMakeVisible(component);
+            &layer,&op,&waveform,&envelope,&layerLabel,&operatorLabel,&status,&envelopeAvailability,&spectrogram,&synthTab,&outputTab,&effectsTab}) addAndMakeVisible(component);
+    for (auto* tab : {&synthTab,&outputTab,&effectsTab}) {
+        tab->setClickingTogglesState(true); tab->setRadioGroupId(1);
+    }
+    synthTab.onClick=[this] { showPage(0); };
+    outputTab.onClick=[this] { showPage(1); };
+    effectsTab.onClick=[this] { showPage(2); };
     for (int i=0;i<SYNTH_PRESET_COUNT;++i) presets.addItem(synthPresetName(i),i+1);
     presets.setTextWhenNothingSelected("Custom sound");
     presets.onChange=[this] { if (presets.getSelectedId()>0) synthProcessor.setCurrentProgram(presets.getSelectedId()-1); };
@@ -85,9 +93,9 @@ CSynthEditor::CSynthEditor(CSynthProcessor& p)
     status.setFont(juce::FontOptions(13.0f));
     envelopeAvailability.setFont(juce::FontOptions(12.0f));
     envelopeAvailability.setColour(juce::Label::textColourId,juce::Colour(0xffb9c9db));
-    keyboard.setAvailableRange(36,96); keyboard.setLowestVisibleKey(48); keyboard.setWantsKeyboardFocus(false);
     bindSelection();
-    setResizable(true,true); setResizeLimits(1000,780,1600,1100); setSize(1180,880);
+    setResizable(true,true); setResizeLimits(1000,650,1600,900); setSize(1180,700);
+    showPage(0);
     startTimerHz(15);
 }
 CSynthEditor::~CSynthEditor()
@@ -164,37 +172,60 @@ void CSynthEditor::chooseFile(bool importing)
             if (result!=0) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"CSynth",error);
         });
 }
+void CSynthEditor::showPage(int page)
+{
+    currentPage=page;
+    synthTab.setToggleState(page==0,juce::dontSendNotification);
+    outputTab.setToggleState(page==1,juce::dontSendNotification);
+    effectsTab.setToggleState(page==2,juce::dontSendNotification);
+    for (auto& knob : globalKnobs) knob->setVisible(page==1);
+    for (auto& knob : effectKnobs) knob->setVisible(page==2);
+    for (auto& knob : layerKnobs) knob->setVisible(page==0);
+    for (auto& knob : operatorKnobs) knob->setVisible(page==0);
+    for (auto* component : std::initializer_list<juce::Component*>{&layer,&op,&waveform,&envelope,&layerLabel,&operatorLabel,&envelopeAvailability})
+        component->setVisible(page==0);
+    resized(); repaint();
+}
 void CSynthEditor::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff101722));
-    float sx=getWidth()/1180.0f, sy=getHeight()/880.0f;
+    float sx=getWidth()/1180.0f, sy=getHeight()/700.0f;
     g.addTransform(juce::AffineTransform::scale(sx,sy));
     g.setColour(juce::Colour(0xff47c8c0)); g.setFont(juce::FontOptions(27.0f).withStyle("Bold"));
     g.drawText("CSynth",20,17,200,35,juce::Justification::centredLeft);
     g.setColour(juce::Colour(0xffa9bbce)); g.setFont(juce::FontOptions(14.0f));
     g.drawText("libcsynth / Audio Unit",20,50,210,22,juce::Justification::centredLeft);
-    g.drawText("OUTPUT / MASTER ADSR",20,84,400,22,juce::Justification::centredLeft);
-    g.drawText("ECHO / REVERB",20,204,400,22,juce::Justification::centredLeft);
-    g.drawText("LAYERS",20,337,130,25,juce::Justification::centredLeft);
-    g.drawText("OPERATOR",20,487,160,25,juce::Justification::centredLeft);
+    if (currentPage==0) g.drawText("OPERATOR",20,259,160,25,juce::Justification::centredLeft);
+    if (currentPage==1) {
+        g.drawText("MASTER ADSR",20,130,500,22,juce::Justification::centredLeft);
+        g.drawText("FILTERS / OUTPUT",20,295,500,22,juce::Justification::centredLeft);
+        g.drawText("Master ADSR shapes volume. Filters, effects, and output gain follow the synth layers.",20,470,1140,25,juce::Justification::centredLeft);
+    }
+    if (currentPage==2) {
+        g.drawText("ECHO",20,130,500,22,juce::Justification::centredLeft);
+        g.drawText("REVERB",20,295,500,22,juce::Justification::centredLeft);
+        g.drawText("Raise Echo mix or Reverb mix to hear the effect. Changes apply while playing.",20,470,1140,25,juce::Justification::centredLeft);
+    }
     g.setColour(juce::Colour(0xff29374a));
-    for (int y : {78,330,480,750}) g.drawHorizontalLine(y,20,1160);
+    for (int y : {78,120,540}) g.drawHorizontalLine(y,20,1160);
 }
 void CSynthEditor::resized()
 {
     auto place=[this](juce::Component& c,int x,int y,int w,int h) {
-        c.setBounds(juce::roundToInt(x*getWidth()/1180.0),juce::roundToInt(y*getHeight()/880.0),
-                    juce::roundToInt(w*getWidth()/1180.0),juce::roundToInt(h*getHeight()/880.0));
+        c.setBounds(juce::roundToInt(x*getWidth()/1180.0),juce::roundToInt(y*getHeight()/700.0),
+                    juce::roundToInt(w*getWidth()/1180.0),juce::roundToInt(h*getHeight()/700.0));
     };
     place(presets,240,26,330,34); place(previous,580,26,36,34); place(next,622,26,36,34);
     place(import,675,26,140,34); place(exportSound,825,26,140,34); place(release,980,26,180,34);
-    for (int i=0;i<7;++i) place(*globalKnobs[static_cast<std::size_t>(i)],20+i*163,106,157,96);
-    for (int i=0;i<6;++i) place(*effectKnobs[static_cast<std::size_t>(i)],20+i*190,228,180,96);
-    place(layerLabel,160,335,85,30); place(layer,245,335,155,30);
-    place(operatorLabel,435,335,100,30); place(op,540,335,155,30);
-    for (int i=0;i<4;++i) place(*layerKnobs[static_cast<std::size_t>(i)],20+i*285,374,265,96);
-    place(waveform,220,487,200,30); place(envelope,450,487,200,30);
-    place(envelopeAvailability,665,487,495,30);
-    for (int i=0;i<10;++i) place(*operatorKnobs[static_cast<std::size_t>(i)],20+(i%5)*228,526+(i/5)*112,215,112);
-    place(status,20,755,1140,32); place(keyboard,20,796,1140,70);
+    place(synthTab,20,85,150,30); place(outputTab,180,85,180,30); place(effectsTab,370,85,150,30);
+    for (int i=0;i<4;++i) place(*globalKnobs[static_cast<std::size_t>(i)],20+i*285,160,265,120);
+    for (int i=4;i<7;++i) place(*globalKnobs[static_cast<std::size_t>(i)],20+(i-4)*380,325,360,120);
+    for (int i=0;i<6;++i) place(*effectKnobs[static_cast<std::size_t>(i)],20+(i%3)*380,160+(i/3)*165,360,120);
+    place(layerLabel,20,128,85,30); place(layer,105,128,155,30);
+    place(operatorLabel,300,128,100,30); place(op,405,128,155,30);
+    for (int i=0;i<4;++i) place(*layerKnobs[static_cast<std::size_t>(i)],20+i*285,158,265,96);
+    place(waveform,220,259,200,30); place(envelope,450,259,200,30);
+    place(envelopeAvailability,665,259,495,30);
+    for (int i=0;i<10;++i) place(*operatorKnobs[static_cast<std::size_t>(i)],20+(i%5)*228,300+(i/5)*104,215,104);
+    place(status,20,510,1140,28); place(spectrogram,20,548,1140,140);
 }

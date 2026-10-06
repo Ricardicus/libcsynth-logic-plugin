@@ -42,6 +42,7 @@ void CSynthProcessor::clearMidi()
 void CSynthProcessor::prepareToPlay(double rate, int)
 {
     clearMidi();
+    spectrumTap.sampleRate.store(rate,std::memory_order_relaxed);
     auto config=readConfig();
     engine.reset(synthCreate(juce::roundToInt(rate),&config));
     ready.store(engine!=nullptr);
@@ -141,6 +142,7 @@ void CSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
         handleMidi(metadata.getMessage());
     }
     render(buffer,position,buffer.getNumSamples()-position);
+    spectrumTap.push(buffer.getReadPointer(0),buffer.getNumSamples());
     midi.clear();
 }
 double CSynthProcessor::getTailLengthSeconds() const

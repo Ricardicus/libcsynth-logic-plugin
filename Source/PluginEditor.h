@@ -21,12 +21,15 @@ private:
     void bindSelection();
     void timerCallback() override;
     void chooseFile(bool importing);
+    void showPage(int page);
     CSynthProcessor& synthProcessor;
     juce::LookAndFeel_V4 look;
     juce::ComboBox presets, layer, op, waveform, envelope;
     juce::TextButton previous{"<"}, next{">"}, import{"Import .synth"}, exportSound{"Export .synth"}, release{"Release notes"};
     juce::Label layerLabel, operatorLabel, status, envelopeAvailability;
-    juce::MidiKeyboardComponent keyboard;
+    juce::TextButton synthTab{"Synth"}, outputTab{"Output & filters"}, effectsTab{"Effects"};
+    int currentPage=0;
+    OutputSpectrogram spectrogram;
     juce::TooltipWindow tooltips{this,500};
     std::vector<std::unique_ptr<Knob>> globalKnobs, effectKnobs, layerKnobs, operatorKnobs;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> waveAttachment, envelopeAttachment;
