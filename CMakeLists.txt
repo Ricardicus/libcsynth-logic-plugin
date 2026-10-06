@@ -61,6 +61,9 @@ foreach(bundle_target CSynth_AU CSynth_Standalone)
 endforeach()
 
 if(BUILD_TESTING)
+    add_executable(CSynthScreenshots tools/CaptureEditor.cpp)
+    target_link_libraries(CSynthScreenshots PRIVATE CSynth csynth::csynth juce::juce_audio_utils)
+
     add_executable(CSynthTests tests/ProcessorTests.cpp)
     target_link_libraries(CSynthTests PRIVATE CSynth csynth::csynth juce::juce_audio_utils juce::juce_dsp)
     add_test(NAME processor COMMAND CSynthTests)

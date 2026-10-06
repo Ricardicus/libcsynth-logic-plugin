@@ -2,7 +2,8 @@
 
 This is a software-instrument plugin built around
 [libcsynth](https://github.com/Ricardicus/libcsynth). It turns MIDI notes into
-FM synth audio and presents the sound controls inside Logic Pro.
+FM synth audio or a pitched sample instrument, with the sound controls inside
+Logic Pro.
 
 The Logic version is an **Audio Unit v2 instrument** called **CSynth**, under
 manufacturer **Ricardicus**. The build also creates a standalone app for trying
@@ -10,12 +11,18 @@ sounds without a DAW. There is no SDL dependency in this project: Logic supplies
 the audio device and MIDI, JUCE supplies the plugin wrapper/editor, and
 libcsynth renders the samples.
 
-![CSynth editor](docs/editor.png)
+![Synth tab: FM layers and operators, factory preset controls, and live output spectrogram](docs/editor.png)
+
+The screenshots below come from the current editor at its default 1,180 × 700
+size. The Samples view uses the three piano recordings described below; all
+five tabs share the preset controls and live output spectrogram.
 
 ## What you can do
 
 - Choose any of the 64 factory sounds and step through them with the arrows.
-- Play chords with velocity and a sustain pedal.
+- Build a sample instrument from one or several WAV/MP3 files and their recorded
+  pitches in Hz.
+- Play chords with velocity and a sustain pedal, in either FM or sample mode.
 - Edit up to eight layers and eight FM operators per layer, including waveforms,
   FM depth, ratios, modulation envelopes, vibrato, pulse width, gain, and detune.
 - Change master ADSR, low-pass/high-pass cutoffs, echo, and reverb while playing.
@@ -83,7 +90,7 @@ git submodule update --remote logic-plugin/libcsynth
 ```
 
 Build and test afterward, then commit the changed submodule pointer. The current
-revision includes `SynthConfig.filters`, which the plugin requires.
+revision includes filters and the sample-bank API, both required by the plugin.
 
 The first full build takes longer because JUCE is compiled too. Subsequent
 source edits reuse those objects. The build doesn't install anything into your
@@ -224,30 +231,41 @@ or unrelated plugin caches as part of this project's installation.
 
 ## Working with the controls
 
-The editor is 1,180 × 700 by default and has four tabs: **Synth** for layers
-and operators, **Output & filters** for master ADSR, filters, and gain, and
-**Effects** for echo and reverb, and **Keyboard** for testing sounds with the mouse.
-Presets and the live spectrogram stay visible
-on every tab. Switching tabs preserves your edits and does not interrupt audio.
-![Keyboard tab](docs/keyboard.png)
+The editor is 1,180 × 700 by default and has five tabs:
+
+| Tab | What it controls |
+| --- | --- |
+| **Synth** | Layers, gain/detune, and FM operators. |
+| **Output & filters** | Master ADSR, lowpass/highpass cutoffs, and output gain. |
+| **Effects** | Free or tempo-synced echo, plus reverb. |
+| **Keyboard** | An on-screen piano for testing with the mouse. |
+| **Samples** | Recording files, their base frequencies, and FM/sample source selection. |
+
+Presets and the live spectrogram stay visible on every tab. Switching tabs
+preserves your edits and does not interrupt audio.
+
+![Keyboard tab with A4 held on the on-screen piano](docs/keyboard.png)
 
 On Keyboard, click or drag across the piano to play. Switching away releases
 notes held by the on-screen keyboard. MIDI from Logic and Musical Typing work
 on every tab.
 
 The top row chooses a **complete factory patch**. Its arrows wrap at either end.
-Factory selection replaces the synth settings while preserving the Output gain.
+Factory selection replaces the synth settings and switches the source to FM,
+while preserving the Output gain and keeping the sample bank loaded.
 The name remains the last chosen factory preset when you edit it; your edits
 are still saved in the Logic project. Importing a `.synth` setting shows Custom.
 
-**Output / Master ADSR** controls note volume and final gain. A filter set to
-**Off** is bypassed; enter 0 to turn it off. Filter cutoffs run from 20 to
+![Output & filters tab with master ADSR, lowpass, highpass, and output gain](docs/output.png)
+
+**Output / Master ADSR** controls note volume and final gain in both FM and
+sample mode. A filter set to **Off** is bypassed; enter 0 to turn it off. Filter cutoffs run from 20 to
 20000 Hz, clamped internally below Nyquist for the host sample rate. The filters
 run on the voice mix before echo/reverb, so changing a cutoff doesn't erase
 an effect tail that is already ringing.
 
-**Echo / Reverb** controls the shared effects. Echo delay is in milliseconds,
-not musical divisions, and isn't synchronized to Logic's tempo.
+**Echo / Reverb** controls the shared effects for both sources. Choose **Free
+(ms)** for a millisecond delay, or a note division that follows Logic's tempo.
 
 **Edit layer** and **Edit operator** choose which stored slot the controls show.
 They don't change the active counts. Turn up Active layers / Active operators
@@ -267,9 +285,11 @@ width asks you to choose Pulse, and index-envelope knobs ask for Decay or ADSR
 mode. The carrier has no FM depth or index envelope; select an earlier operator
 or increase Active operators to make it a modulator. Hover a control’s label or
 reason for the full explanation. These hints update when you change the selected
-operator, waveform, envelope mode, or preset.
+operator, waveform, envelope mode, preset, or source. In sample mode, FM-only
+controls say **Sample source: FM only**; master ADSR, filters, effects, and
+layer gain/detune remain available.
 
-![Echo timing controls](docs/effects.png)
+![Effects tab with a dotted eighth echo, the synced-delay explanation, and reverb knobs](docs/effects.png)
 
 On the Effects tab, **Echo timing** offers **Free (ms)** plus 1/32, 1/16, 1/8,
 1/4, 1/2, and whole-note divisions, each straight, dotted, or triplet. Synced
@@ -303,11 +323,147 @@ exists. FFTs and drawing run on the UI thread, and closing the editor disables
 capture. If the UI falls behind, visualization data is discarded; audio never
 waits for the display. The spectrogram is not stored with your patch.
 
+## Sample instruments
+
+![Samples tab with Piano.pp.A3.wav, Piano.pp.A4.wav, and Piano.pp.A5.wav applied at their recorded pitches](docs/samples.png)
+
+A sample instrument starts with a recording of a known note. You tell CSynth
+which pitch is in the file; it then plays the recording faster or slower to
+produce the MIDI notes you send it. The **Base frequency (Hz)** field describes
+the recording, not the note you want to play next. You only set it once per
+file, unless the original pitch was wrong.
+
+### Set up your three piano recordings
+
+Keep the recordings in a folder you plan to leave in place, then:
+
+1. Open **Samples** and click **Add sound files**. The picker accepts one file
+   or several at once; choose your three WAVs together.
+2. Click each Hz field and enter the pitch from this table. Clicking selects
+   the current text so you can replace it; Enter finishes editing.
+3. Click **Apply files**. The source changes to **Sample source**, and the
+   bank count becomes 3.
+4. Play MIDI from Logic or use the **Keyboard** tab. Return to **Output &
+   filters** to set master ADSR, and **Effects** for echo or reverb.
+
+| Recording | Recorded note | Base frequency (Hz) |
+| --- | --- | ---: |
+| `Piano.pp.A3.wav` | A3 | 220.00 |
+| `Piano.pp.A4.wav` | A4 | 440.00 |
+| `Piano.pp.A5.wav` | A5 | 880.00 |
+
+These use A4 = 440 Hz (MIDI note 69). Some apps number octaves differently;
+the actual frequency is what matters. For a recording tuned away from concert
+pitch, enter its measured frequency instead. The filename is just a label:
+CSynth does not infer pitch from `A3`, analyze the sound, or retune a recording
+before loading it. New rows start at **440.00**, so check every row.
+
+One file is enough. With only A4 at 440 Hz, MIDI A4 plays at its original
+speed, A5 plays twice as fast, and A3 plays at half speed. Pitch changes also
+change the recording's duration and timbre. With the three files above,
+CSynth can use the original A3/A4/A5 recordings at those notes and transpose
+from a closer recording between them. More recordings across the keyboard
+usually preserve a piano's character better than stretching one file over
+several octaves.
+
+### Choose and edit the bank
+
+The list scrolls when it grows beyond the visible rows. Click a filename to
+select it, then **Remove selected** to remove it from the draft. Hz fields
+accept decimals. Frequencies must be finite, at least 1 Hz, and no higher
+than half that file's sample rate. An invalid value or unreadable file reports
+the failing row.
+
+The **draft** is the list you are editing; the **bank** is what currently makes
+sound. Adding/removing files or changing Hz does not alter the playing bank
+until you press **Apply files**. Applying loads the whole draft as a replacement,
+not as extra recordings added to the previous bank. If any row fails, the
+previous bank keeps playing. Removing a draft row does not delete its audio
+file from disk.
+
+**FM source** switches back to the oscillator instrument. **Sample source**
+returns to the applied bank without decoding it again; it is disabled until
+there is a valid bank. Factory presets select FM, but retain that bank, so you
+can switch back. **Import .synth** changes the processing settings while
+keeping the current source.
+
+### What happens when you play
+
+For each layer and MIDI note, libcsynth selects the recording whose base
+frequency is closest in semitones. It adjusts playback speed by the target
+frequency divided by that recording's base frequency, accounting for the
+file's sample rate and Logic's audio rate. Linear interpolation reads between
+source frames. Layer detune affects both the target pitch and recording choice.
+There are no manually assigned key ranges or crossfades between recordings.
+
+MIDI velocity controls volume; it does not choose a different recording.
+For example, `pp` in your piano filenames describes how those notes were
+recorded, but CSynth does not interpret it as a velocity zone. Playing harder
+makes that same quiet-piano recording louder. Velocity layers, round-robin
+selection, and separate release samples are not implemented.
+
+The signal follows this path in sample mode:
+
+```text
+Recording selection and pitch -> layer gain + master ADSR + MIDI velocity
+    -> mix layers/notes -> highpass -> lowpass -> echo -> reverb -> output gain
+```
+
+**Active layers**, **Layer gain**, and **Layer detune** still work. Each layer
+uses the same bank, with its own pitch and playback position. FM operator
+waveforms, ratios, FM depth, vibrato, and index envelopes do not process the
+recordings; their controls explain that they are FM-only. Use the master ADSR
+on **Output & filters** for the sampled note's volume envelope.
+
+The plugin loads files as **one-shots**: playback stops at the end of a
+recording, even if the key is still held. Master attack/decay/sustain scale the
+recorded sound, and release fades it after note-off. Sustain cannot make a
+short file longer, and a long release cannot recover audio after the file has
+ended. Echo and reverb can continue after the source stops. For a piano,
+start with a short master attack, high sustain, and a release that lets go
+naturally; the recording already contains its own attack and decay.
+
+WAV and MP3 are supported, with mixed sample rates; multichannel audio is
+mixed down to mono. Up to **128 recordings** and **256 MiB of decoded mono
+float audio** fit in a bank. Compressed MP3 size is not its decoded memory
+size. WAV is a useful starting point for preserving transients without lossy
+compression. Loading happens when you click Apply, outside the render
+callback; a large bank may take a moment to decode.
+
+libcsynth itself supports looping banks and `.csamples` maps, as described in
+[its sample documentation](libcsynth/README.md).
+The current plugin picker accepts **WAV/MP3 recordings**, not `.csamples`
+maps, and the plugin has no loop-point editor. The piano map used by the SDL
+app is not needed here: enter the same three frequencies in this list.
+
+### Save it with a Logic project
+
+Logic's project state saves the **applied** file paths and frequencies, the
+current source mode, the separate editing draft, and the synth's processing
+parameters. Reopening the project loads the applied bank again; unapplied
+draft edits remain unapplied. Closing/reopening the plugin window keeps both
+lists, and audio-device/sample-rate changes retain the loaded bank.
+
+Recordings are referenced by **absolute path**, not embedded in the project
+or copied into Logic's project assets. Keep them in a stable folder. When
+moving a project to another Mac, copy the recordings too; if their paths
+change, remove the old draft rows, browse to the new files, set their Hz, and
+apply again. Keep a note of the frequencies if you organize the files later.
+
+If an applied recording is missing when a project opens, the Samples tab
+shows the loading error and the plugin falls back to FM. Restore the original
+path, or rebuild the draft at its new location and apply it. A `.synth` export
+contains processing settings only; it does not contain the sample list,
+source mode, or audio files. Use Logic's project/plugin settings to preserve
+the complete sample-instrument setup, together with the external recordings.
+
 ## Saving sounds and projects
 
 Saving the Logic project stores the complete parameter state for each plugin
 instance, including all inactive layers/operators, filters, effects, and Output
-gain. Reopening the project doesn't depend on a `.synth` file still being present.
+gain. It also stores the sample-instrument source, applied bank references,
+and editing draft. Reopening does not need an exported `.synth` file, but a
+sampled instrument does need its referenced recordings to remain accessible.
 You can also use Logic's plugin settings menu to save/recall a setting for reuse
 in other projects.
 
@@ -328,6 +484,10 @@ from the track's automation menu. Master controls have names such as Low-pass
 cutoff. Layer controls have names such as Layer 1 OP2 FM depth. The editor's
 layer/operator selection isn't itself a sound parameter: choosing another slot
 doesn't retarget an automation lane you've already recorded.
+
+Master ADSR, filters, effects, layer gain/detune, and output gain automation
+also work in sample mode. The recording list, Hz fields, Apply button, and
+FM/sample source switch are saved settings, not host automation parameters.
 
 Parameter changes reach the engine at audio-block boundaries. MIDI note and
 sustain events split the block at their sample offsets, so notes aren't all
@@ -374,7 +534,10 @@ such a sandbox. The tests do not install the plugin.
 
 The processor test covers MIDI sample offsets, sustain, overlapping channels,
 state restoration (including inactive operators), independent instances, every
-factory preset, and constructing the editor. The Audio Unit test loads the built
+factory preset, and constructing the editor. It also covers sample loading,
+Hz editing/apply in the editor, single/multiple recordings, live ADSR and
+filter changes, effect tails, source switching, missing-file errors, and
+restoring applied banks independently of their drafts. The Audio Unit test loads the built
 component directly, creates an instrument instance, renders MIDI, and round-trips
 its AU state. It doesn't install the plugin into your Library.
 
@@ -391,8 +554,11 @@ can break old settings and automation.
 
 `Source/Parameters.cpp` maps libcsynth fields to host parameters.
 `Source/PluginProcessor.cpp` owns the engine and handles audio/MIDI/state.
-`Source/PluginEditor.cpp` builds the UI. During processing, engine mutations happen on the audio
-thread; the editor and host communicate through parameter values.
+`Source/PluginEditor.cpp` builds the tabbed UI; `Source/SamplePanel.h` handles
+recording selection and base-frequency editing. Ordinary parameter changes
+reach the engine on the audio thread. Recording decoding happens on the
+calling control thread outside the callback lock; bank replacement and source
+switching take that lock to exclude rendering.
 
 To move this project into a separate repo, copy this folder **without** its
 `build*` directories or `libcsynth/` checkout, then initialize the new repository:
@@ -400,7 +566,7 @@ To move this project into a separate repo, copy this folder **without** its
 ```sh
 git init
 git submodule add https://github.com/Ricardicus/libcsynth.git libcsynth
-git -C libcsynth checkout 4f33f0c3dafa001595b5b4d14b421c5913aa709c
+git -C libcsynth checkout 694d01d16b9f11869ec907add030f7e06bce0a46
 git add .gitmodules libcsynth
 ```
 
@@ -423,48 +589,28 @@ licensing decisions belong in the distribution process.
 The native arm64 Release build passed both processor and Audio Unit tests.
 The AU test loaded the built component, rendered offset MIDI, and restored its
 state. The AU and standalone bundles also passed `codesign --verify --deep
---strict`. The editor screenshot above comes from that build. Logic itself
-still needs the installation and manual check described above; the automated
+--strict`. The tab screenshots come from the current editor, rendered directly
+without installing the AU. Logic itself still needs the installation and manual check described above; the automated
 test does not replace Logic’s scan or `auval`.
 
 The plugin build defines `CSYNTH_ECHO_MAX_DELAY_MS=30000` for libcsynth and
 its clients. This uses about 5.8 MB for the echo buffer at 48 kHz, allocated
-once when the engine starts. The submodule contains the small capacity-option
-change required for this; commit/publish those library changes before sharing
-an updated submodule pointer with another checkout. Ordinary library builds
-still default to 2,000 ms.
+once when the engine starts. The pinned submodule supports this capacity
+option. Ordinary library builds still default to 2,000 ms.
 
-## Sample instruments
+### Refresh the README screenshots
 
-Open the **Samples** tab and click **Add sound files**. Choose one or several
-WAV/MP3 recordings, then enter the note recorded in each file as a frequency
-in Hz. A3 is 220.00 Hz, A4 is 440.00 Hz, and A5 is 880.00 Hz. Click **Apply
-files** to decode the recordings and start playing them with Logic MIDI or
-the plugin's Keyboard tab. One recording is enough; with several, libcsynth
-chooses the closest recorded pitch and transposes it for each note.
+With `BUILD_TESTING=ON`, build the editor capture tool and point it at the
+folder containing `Piano.pp.A3.wav`, `Piano.pp.A4.wav`, and `Piano.pp.A5.wav`.
+From the parent repository:
 
-The list scrolls, Hz fields are editable, and **Remove selected** removes a
-file from the draft. Changes take effect when you apply them. If decoding or
-validation fails, the previously applied bank keeps playing. **FM source**
-and **Sample source** switch without reloading; choosing a factory preset
-switches to FM. Importing a `.synth` setting changes processing parameters
-while retaining the current source.
+```sh
+cmake --build logic-plugin/build --target CSynthScreenshots --parallel 4
+./logic-plugin/build/CSynthScreenshots logic-plugin/docs libcsynth/media
+```
 
-**Output & filters** controls master ADSR, lowpass, highpass and gain for
-both sources. **Effects** works too, including tempo-synced echo and reverb.
-Layer gain/detune still affect samples. FM operator controls show why they
-are unavailable in sample mode. Added files play once, so holding a key or
-increasing ADSR sustain cannot extend a recording past its end.
-
-Logic's project state saves the applied bank's file paths and frequencies,
-the source mode, and the separate editing draft. It reloads the recordings
-when the project opens and retains the bank through audio-device/sample-rate
-changes. The recordings are referenced by absolute path, not embedded: keep
-them in a stable folder, and copy them separately when moving a project.
-Missing files produce an error on the Samples tab and fall back to FM;
-browse to their new location and apply again. Exported `.synth` files contain
-processing settings only, not the recordings.
-
-File decoding happens on the calling control thread outside the audio lock.
-A short callback lock protects bank replacement and source switching. The
-render callback reads the already decoded bank; it does no sample-file I/O.
+It writes `editor.png`, `output.png`, `effects.png`, `keyboard.png`, and
+`samples.png` using the real plugin editor, with rendered audio feeding the
+spectrogram. It does not install the plugin or open Logic. The capture tool
+only needs those recordings when generating the Samples view; building the
+plugin itself does not depend on these particular piano files.
