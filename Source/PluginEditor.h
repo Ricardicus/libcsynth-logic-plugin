@@ -1,6 +1,7 @@
 #pragma once
 #include "PluginProcessor.h"
 #include "SamplePanel.h"
+#include "RoutingDiagram.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 
 class CSynthEditor final : public juce::AudioProcessorEditor, private juce::Timer {
@@ -19,6 +20,7 @@ private:
         juce::Slider slider;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };
+    void bindRouting();
     void bindSelection();
     void timerCallback() override;
     void chooseFile(bool importing);
@@ -28,7 +30,12 @@ private:
     juce::ComboBox presets, layer, op, waveform, envelope, echoTiming;
     juce::TextButton previous{"<"}, next{">"}, import{"Import .synth"}, exportSound{"Export .synth"}, release{"Release notes"};
     juce::Label layerLabel, operatorLabel, status, envelopeAvailability, echoTimingInfo;
-    juce::TextButton synthTab{"Synth"}, outputTab{"Output & filters"}, effectsTab{"Effects"}, keyboardTab{"Keyboard"}, samplesTab{"Samples"};
+    juce::TextButton synthTab{"Synth"}, outputTab{"Output & filters"}, effectsTab{"Effects"}, keyboardTab{"Keyboard"}, samplesTab{"Samples"}, routingTab{"FM routing"};
+    juce::ComboBox algorithm, routingLayer, routingOp;
+    juce::Label routingInfo;
+    RoutingDiagram routingDiagram;
+    std::vector<std::unique_ptr<Knob>> routingKnobs;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> algorithmAttachment;
     SamplePanel samplePanel;
     juce::MidiKeyboardComponent keyboard;
     int currentPage=0;

@@ -1,0 +1,4 @@
+[submodule "libcsynth"]
+	path = libcsynth
+	url = https://github.com/Ricardicus/libcsynth.git
+	branch = master

@@ -54,13 +54,14 @@ CSynthEditor::CSynthEditor(CSynthProcessor& p)
     look.setColour(juce::TextButton::buttonOnColourId,juce::Colour(0xff21666d));
     setLookAndFeel(&look);
     for (auto* component : std::initializer_list<juce::Component*>{&presets,&previous,&next,&import,&exportSound,&release,
-            &layer,&op,&waveform,&envelope,&layerLabel,&operatorLabel,&status,&envelopeAvailability,&spectrogram,&echoTiming,&echoTimingInfo,&synthTab,&outputTab,&effectsTab,&keyboardTab,&samplesTab,&samplePanel,&keyboard}) addAndMakeVisible(component);
-    for (auto* tab : {&synthTab,&outputTab,&effectsTab,&keyboardTab,&samplesTab}) {
+            &layer,&op,&waveform,&envelope,&layerLabel,&operatorLabel,&status,&envelopeAvailability,&spectrogram,&echoTiming,&echoTimingInfo,&synthTab,&outputTab,&effectsTab,&keyboardTab,&samplesTab,&routingTab,&algorithm,&routingLayer,&routingOp,&routingInfo,&routingDiagram,&samplePanel,&keyboard}) addAndMakeVisible(component);
+    for (auto* tab : {&synthTab,&outputTab,&effectsTab,&keyboardTab,&samplesTab,&routingTab}) {
         tab->setClickingTogglesState(true); tab->setRadioGroupId(1);
     }
     synthTab.onClick=[this] { showPage(0); };
     outputTab.onClick=[this] { showPage(1); };
     effectsTab.onClick=[this] { showPage(2); };
+    routingTab.onClick=[this] { showPage(5); };
     samplesTab.onClick=[this] { showPage(4); };
     keyboardTab.onClick=[this] { showPage(3); };
     keyboard.setAvailableRange(36,96); keyboard.setLowestVisibleKey(36);
@@ -104,6 +105,15 @@ CSynthEditor::CSynthEditor(CSynthProcessor& p)
     status.setFont(juce::FontOptions(13.0f));
     envelopeAvailability.setFont(juce::FontOptions(12.0f));
     envelopeAvailability.setColour(juce::Label::textColourId,juce::Colour(0xffb9c9db));
+    for (int i=0;i<8;++i) { routingLayer.addItem("Layer "+juce::String(i+1),i+1); routingOp.addItem("Destination OP"+juce::String(i+1),i+1); }
+    for (int i=0;i<FM_ALGORITHM_COUNT;++i) algorithm.addItem(fmAlgorithmName(static_cast<FmAlgorithm>(i)),i+1);
+    routingLayer.setSelectedId(1,juce::dontSendNotification); routingOp.setSelectedId(2,juce::dontSendNotification);
+    routingLayer.setName("Routing layer"); routingOp.setName("Routing destination"); algorithm.setName("FM algorithm");
+    routingDiagram.onSelect=[this](int index) { routingOp.setSelectedId(index+1,juce::sendNotificationSync); };
+    routingLayer.onChange=[this] { bindRouting(); }; routingOp.onChange=[this] { bindRouting(); };
+    make(routingKnobs,"Audible output",""); make(routingKnobs,"Feedback","");
+    for (int i=0;i<7;++i) make(routingKnobs,("From OP"+juce::String(i+1)).toRawUTF8(),"");
+    bindRouting();
     bindSelection();
     setResizable(true,true); setResizeLimits(1000,650,1600,900); setSize(1180,700);
     showPage(0);
@@ -112,8 +122,24 @@ CSynthEditor::CSynthEditor(CSynthProcessor& p)
 CSynthEditor::~CSynthEditor()
 {
     stopTimer(); keyboard.clearKeyMappings(); waveAttachment.reset(); envelopeAttachment.reset(); echoTimingAttachment.reset();
+    algorithmAttachment.reset(); routingKnobs.clear();
     globalKnobs.clear(); effectKnobs.clear(); layerKnobs.clear(); operatorKnobs.clear();
     setLookAndFeel(nullptr);
+}
+void CSynthEditor::bindRouting()
+{
+    int l=routingLayer.getSelectedId()-1, d=routingOp.getSelectedId()-1;
+    if (l<0 || d<0) return;
+    algorithmAttachment.reset();
+    algorithmAttachment=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(synthProcessor.state,parameters::layerId(l,"algorithm"),algorithm);
+    routingKnobs[0]->bind(synthProcessor.state,parameters::operatorId(l,d,"output"));
+    routingKnobs[1]->bind(synthProcessor.state,parameters::operatorId(l,d,"feedback"));
+    for (int i=0;i<7;++i) {
+        auto& knob=*routingKnobs[static_cast<std::size_t>(i+2)];
+        if (i<d) knob.bind(synthProcessor.state,parameters::layerId(l,"route_"+juce::String(i)+"_"+juce::String(d)));
+        else { knob.attachment.reset(); knob.slider.setRange(0,1,.001); knob.slider.setValue(0,juce::dontSendNotification); }
+    }
+    timerCallback();
 }
 void CSynthEditor::bindSelection()
 {
@@ -132,18 +158,20 @@ void CSynthEditor::timerCallback()
 {
     presets.setSelectedId(synthProcessor.factorySelection()+1,juce::dontSendNotification);
     auto config=synthProcessor.readConfig(); int l=layer.getSelectedId()-1, o=op.getSelectedId()-1;
-    bool modulator=o<config.layers[l].fm.operatorCount-1;
+    const auto& fm=config.layers[l].fm;
+    FmSynth topology{}; fmInit(&topology,48000,&fm);
+    bool outgoing=false;
+    for (int destination=o+1;destination<fm.operatorCount;++destination) outgoing |= topology.routing[o][destination]>0;
+    bool modulator=o<fm.operatorCount && topology.modulators[o];
     int mode=config.layers[l].fm.operators[o].indexMode;
-    const bool carrier=o==config.layers[l].fm.operatorCount-1;
-    const juce::String roleReason=modulator ? "" : carrier ? "Carrier: select a modulator" : "Inactive: add more operators";
-    const juce::String roleHelp=modulator ? "" : carrier
-        ? "This operator is the carrier: it produces the layer's audio. FM depth and index envelopes only apply to modulators. Select an earlier operator, or increase Active operators to make this one a modulator. Use master ADSR to shape output volume."
-        : "This operator is outside the active chain. Increase Active operators beyond this operator's number to make it a modulator, then edit its FM depth and index envelope.";
-    operatorKnobs[1]->setAvailability(roleReason,roleHelp);
+    const bool carrier=o<fm.operatorCount && topology.outputLevels[o]>0;
+    const juce::String roleReason=modulator ? "" : o<fm.operatorCount ? "No modulation from this OP" : "Inactive operator";
+    const juce::String roleHelp="FM depth scales outgoing connections. Index envelopes shape outgoing modulation and self-feedback. Add a connection in FM routing or raise Feedback to enable the index envelope. Use master ADSR for volume.";
+    operatorKnobs[1]->setAvailability(outgoing ? "" : "No outgoing routes",roleHelp);
     envelope.setEnabled(modulator);
     envelope.setTooltip(modulator ? "Modulator envelopes shape timbre. Master ADSR controls volume." : roleHelp);
     envelopeAvailability.setText(modulator ? "Index envelope shapes FM depth; master ADSR shapes volume."
-        : carrier ? "Carrier: FM depth and index envelopes apply only to modulators."
+        : carrier ? "Carrier: add a route or feedback to enable the index envelope."
                   : "Inactive operator: increase Active operators to enable modulation.",juce::dontSendNotification);
     envelopeAvailability.setTooltip(roleHelp);
     operatorKnobs[5]->setAvailability(!modulator ? roleReason : mode==FM_INDEX_DECAY ? "" : "Choose Decay mode",
@@ -173,10 +201,44 @@ void CSynthEditor::timerCallback()
         for (int i : {0,3,4}) operatorKnobs[static_cast<std::size_t>(i)]->setAvailability("");
         waveform.setTooltip("Waveform of the selected operator. The last active operator is the carrier.");
     }
+    if (!routingKnobs.empty()) {
+        int rl=routingLayer.getSelectedId()-1, d=routingOp.getSelectedId()-1;
+        if (rl>=config.layerCount) {
+            routingLayer.setSelectedId(config.layerCount,juce::dontSendNotification);
+            bindRouting(); return;
+        }
+        const auto& routing=config.layers[rl].fm;
+        if (d>=routing.operatorCount) {
+            routingOp.setSelectedId(routing.operatorCount,juce::dontSendNotification);
+            bindRouting(); return;
+        }
+        routingDiagram.update(routing,d,!sampled);
+        FmSynth graph{}; fmInit(&graph,48000,&routing);
+        bool inactive=rl>=config.layerCount || d>=routing.operatorCount;
+        juce::String reason=sampled ? "Sample source: FM only" : inactive ? "Inactive operator" : "";
+        algorithm.setEnabled(!sampled);
+        routingKnobs[0]->setAvailability(reason.isNotEmpty() ? reason : routing.algorithm==FM_ALGORITHM_CHAIN ? "Serial: last OP only" : (routing.algorithm==FM_ALGORITHM_PAIRS ? d%2==1 || d==routing.operatorCount-1 : routing.algorithm==FM_ALGORITHM_FAN_IN ? d==routing.operatorCount-1 : routing.algorithm==FM_ALGORITHM_FAN_OUT ? d>0 || routing.operatorCount==1 : true) ? "" : "Not a carrier in this mode");
+        routingKnobs[1]->setAvailability(reason);
+        for (int i=0;i<7;++i) routingKnobs[static_cast<std::size_t>(i+2)]->setAvailability(
+            reason.isNotEmpty() ? reason : i>=d ? "Earlier sources only" : routing.algorithm!=FM_ALGORITHM_CUSTOM ? "Choose Custom graph" : "",
+            "Custom routes run from earlier operators to the selected destination. Source FM depth and index envelope scale the connection; self-feedback has its own knob.");
+        for (int i=0;i<7;++i) {
+            double shown=i<d ? (routing.algorithm==FM_ALGORITHM_CUSTOM ? routing.routing[i][d] : graph.routing[i][d]) : 0;
+            routingKnobs[static_cast<std::size_t>(i+2)]->slider.setValue(shown,juce::dontSendNotification);
+        }
+        routingKnobs[0]->slider.setValue(routing.algorithm==FM_ALGORITHM_CHAIN ? graph.outputLevels[d] : routing.operators[d].outputLevel,juce::dontSendNotification);
+        juce::String edges;
+        for (int i=0;i<d && i<routing.operatorCount;++i)
+            if (graph.routing[i][d]>0) edges+="OP"+juce::String(i+1)+" ("+juce::String(graph.routing[i][d],2)+")  ";
+        juce::String carriers;
+        for (int i=0;i<routing.operatorCount;++i) if (graph.outputLevels[i]>0) carriers+="OP"+juce::String(i+1)+"  ";
+        routingInfo.setText("Into OP"+juce::String(d+1)+": "+(edges.isEmpty() ? juce::String("none") : edges)+"\nAudible: "+(carriers.isEmpty() ? juce::String("none (raise output levels)") : carriers),juce::dontSendNotification);
+    }
     samplePanel.refresh();
     bool active=l<config.layerCount && o<config.layers[l].fm.operatorCount;
     status.setText(!synthProcessor.engineReady() ? "Audio engine isn't running. In Standalone, choose an audio output in Options." :
         sampled ? "Sample source active. Master ADSR, filters and effects work on your recordings; FM operator controls are inactive." :
+        fm.algorithm!=FM_ALGORITHM_CHAIN ? "Graph FM: use FM routing for connections, audible levels and feedback. Shift-drag for fine control." :
         active ? "Layer/operator selection changes what you edit. Last active operator = carrier. Shift-drag for fine control." :
                  "This slot is inactive. Increase the layer/operator counts to hear it; its settings are still saved.",juce::dontSendNotification);
 }
@@ -209,6 +271,9 @@ void CSynthEditor::showPage(int page)
 {
     if (currentPage==3 && page!=3) keyboard.clearKeyMappings();
     currentPage=page;
+    routingTab.setToggleState(page==5,juce::dontSendNotification);
+    for (auto& knob : routingKnobs) knob->setVisible(page==5);
+    for (auto* c : std::initializer_list<juce::Component*>{&algorithm,&routingLayer,&routingOp,&routingInfo,&routingDiagram}) c->setVisible(page==5);
     samplePanel.setVisible(page==4); samplesTab.setToggleState(page==4,juce::dontSendNotification);
     keyboard.setVisible(page==3);
     keyboardTab.setToggleState(page==3,juce::dontSendNotification);
@@ -244,6 +309,10 @@ void CSynthEditor::paint(juce::Graphics& g)
         g.drawText("REVERB",20,295,500,22,juce::Justification::centredLeft);
         g.drawText("Raise Echo mix or Reverb mix to hear the effect. Changes apply while playing.",20,470,1140,25,juce::Justification::centredLeft);
     }
+    if (currentPage==5) {
+        g.drawText("ALGORITHM / SELECT DESTINATION",20,126,500,22,juce::Justification::centredLeft);
+        g.drawText("White border selects controls. Connections use source FM depth; master ADSR shapes volume.",20,484,1140,25,juce::Justification::centredLeft);
+    }
     if (currentPage==3) {
         g.drawText("PLAY WITH THE MOUSE",20,130,500,22,juce::Justification::centredLeft);
         g.drawText("Click or drag across the keys to test your sound. MIDI from Logic works on every tab.",20,340,1140,25,juce::Justification::centredLeft);
@@ -261,7 +330,12 @@ void CSynthEditor::resized()
     place(import,675,26,140,34); place(exportSound,825,26,140,34); place(release,980,26,180,34);
     place(echoTiming,300,126,235,30); place(echoTimingInfo,545,126,615,30);
     place(synthTab,20,85,150,30); place(outputTab,180,85,180,30); place(effectsTab,370,85,150,30); place(keyboardTab,530,85,150,30);
-    place(samplesTab,690,85,150,30); place(samplePanel,20,130,1140,365);
+    place(samplesTab,690,85,150,30); place(routingTab,850,85,150,30);
+    place(algorithm,20,151,320,30); place(routingLayer,360,151,180,30); place(routingOp,560,151,240,30);
+    place(routingDiagram,20,188,820,190);
+    for (int i=0;i<2;++i) place(*routingKnobs[static_cast<std::size_t>(i)],850+i*155,188,150,114);
+    for (int i=2;i<9;++i) place(*routingKnobs[static_cast<std::size_t>(i)],20+(i-2)*163,382,158,100);
+    place(routingInfo,850,306,310,72); place(samplePanel,20,130,1140,365);
     place(keyboard,20,180,1140,140); keyboard.setKeyWidth(keyboard.getWidth()/36.0f);
     for (int i=0;i<4;++i) place(*globalKnobs[static_cast<std::size_t>(i)],20+i*285,160,265,120);
     for (int i=4;i<7;++i) place(*globalKnobs[static_cast<std::size_t>(i)],20+(i-4)*380,325,360,120);

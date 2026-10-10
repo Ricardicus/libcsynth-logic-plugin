@@ -285,6 +285,11 @@ void CSynthProcessor::setStateInformation(const void* data, int size)
     }
     setSampleFiles(std::move(draft));
     if (!active.empty()) loadSampleFiles(active,static_cast<bool>(instrument.getProperty("enabled",false)));
+    auto defaults=synthDefaultConfig();
+    for (const auto& s : parameters::specs()) if (parameters::routingParameter(s) && !tree.getChildWithProperty("id",s.id).isValid()) {
+        juce::ValueTree parameter{"PARAM"}; parameter.setProperty("id",s.id,nullptr);
+        parameter.setProperty("value",s.read(defaults),nullptr); tree.addChild(parameter,-1,nullptr);
+    }
     state.replaceState(tree);
 }
 juce::AudioProcessorEditor* CSynthProcessor::createEditor() { return new CSynthEditor(*this); }

@@ -48,6 +48,46 @@ int main(int argc,char** argv)
         processor.keyboard.noteOn(1,69,.8f);
         capture("Synth","editor.png"); capture("Output & filters","output.png");
         capture("Effects","effects.png"); capture("Keyboard","keyboard.png");
+        // Exercise every topology and operator count at the diagram's actual size.
+        RoutingDiagram diagram;
+        diagram.setBounds(0,0,820,190);
+        for (int mode=0;mode<FM_ALGORITHM_COUNT;++mode)
+            for (int count=1;count<=8;++count) {
+                auto config=fmDefaultConfig();
+                config.algorithm=static_cast<FmAlgorithm>(mode); config.operatorCount=count;
+                diagram.update(config,count-1,true);
+                for (int i=0;i<count;++i) {
+                    auto bounds=diagram.nodeBounds(i);
+                    require(diagram.getLocalBounds().toFloat().contains(bounds),"Operator outside diagram");
+                    for (int j=0;j<i;++j) require(!bounds.intersects(diagram.nodeBounds(j)),"Overlapping operators");
+                }
+                require(diagram.createComponentSnapshot(diagram.getLocalBounds()).isValid(),"Diagram did not render");
+            }
+        // The real editor must update when the host selects a different preset.
+        processor.setCurrentProgram(64);
+        parameter(processor,"l0_o1_feedback",.15f);
+        capture("FM routing","routing.png");
+        RoutingDiagram* live=nullptr;
+        juce::ComboBox* destination=nullptr;
+        for (auto* child : editor->getChildren()) {
+            if (auto* graph=dynamic_cast<RoutingDiagram*>(child)) live=graph;
+            if (auto* combo=dynamic_cast<juce::ComboBox*>(child))
+                if (combo->getName()=="Routing destination") destination=combo;
+        }
+        require(live && destination,"Missing interactive diagram");
+        live->onSelect(0);
+        require(destination->getSelectedId()==1,"Diagram selection did not bind knobs");
+        auto before=live->createComponentSnapshot(live->getLocalBounds());
+        processor.setCurrentProgram(69); advance();
+        auto after=live->createComponentSnapshot(live->getLocalBounds());
+        bool changed=false;
+        for (int y=0;y<before.getHeight() && !changed;++y)
+            for (int x=0;x<before.getWidth();++x)
+                if (before.getPixelAt(x,y)!=after.getPixelAt(x,y)) { changed=true; break; }
+        require(changed,"Diagram did not follow preset change");
+        parameter(processor,"l0_o2_feedback",.3f);
+        live->onSelect(2);
+        capture("FM routing","routing.png");
         processor.releaseAllNotes(); advance();
         std::vector<CSynthProcessor::SampleFile> files;
         for (int octave=3;octave<=5;++octave) {
@@ -68,7 +108,7 @@ int main(int argc,char** argv)
         processor.keyboard.noteOn(1,69,.8f);
         capture("Samples","samples.png");
         processor.keyboard.noteOff(1,69,0);
-        std::cout<<"Captured all five tabs in "<<folder.getFullPathName()<<'\n';
+        std::cout<<"Captured all six tabs in "<<folder.getFullPathName()<<'\n';
         return 0;
     } catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

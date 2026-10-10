@@ -11,6 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(FetchContent)
 include(CTest)
 
+# The plugin owns its dependency revision, independently of the SDL project.
 set(CSYNTH_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libcsynth")
 if(NOT EXISTS "${CSYNTH_SOURCE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR

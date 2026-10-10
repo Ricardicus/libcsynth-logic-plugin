@@ -15,11 +15,11 @@ libcsynth renders the samples.
 
 The screenshots below come from the current editor at its default 1,180 × 700
 size. The Samples view uses the three piano recordings described below; all
-five tabs share the preset controls and live output spectrogram.
+six tabs share the preset controls and live output spectrogram.
 
 ## What you can do
 
-- Choose any of the 64 factory sounds and step through them with the arrows.
+- Choose any of the 72 factory sounds and step through them with the arrows.
 - Build a sample instrument from one or several WAV/MP3 files and their recorded
   pitches in Hz.
 - Play chords with velocity and a sustain pedal, in either FM or sample mode.
@@ -53,28 +53,20 @@ CMake can be installed with `brew install cmake`. With full Xcode, check that
 
 ## Build it
 
-From the parent synth-garage folder:
+This is its own repository. Clone it with its library dependency:
 
 ```sh
-git submodule update --init --recursive
-cmake -S logic-plugin -B logic-plugin/build -DCMAKE_BUILD_TYPE=Release
-cmake --build logic-plugin/build --config Release --parallel 4
-ctest --test-dir logic-plugin/build -C Release --output-on-failure
-```
-
-Or, from this folder:
-
-```sh
-git submodule update --init --recursive
+git clone --recurse-submodules https://github.com/Ricardicus/logic-plugin-libcsynth.git
+cd logic-plugin-libcsynth
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel 4
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-libcsynth is a Git submodule inside this project at `libcsynth/`. Initialize it
-before configuring; CMake uses that checkout and reports a clear error if it is
-missing. Git records the exact library revision, so CMake doesn't download or
-update libcsynth. JUCE 8.0.12 is still downloaded by CMake at a pinned commit.
+For an existing checkout, run `git submodule update --init --recursive` before
+configuring. libcsynth is this repository's submodule at `libcsynth/`. CMake
+builds that checkout; Git pins the exact library revision. The SDL project is
+not needed. JUCE 8.0.12 is downloaded by CMake at a pinned commit.
 
 To use an existing JUCE checkout:
 
@@ -83,14 +75,18 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DFETCHCONTENT_SOURCE_DIR_JUCE=/absolute/path/to/JUCE
 ```
 
-To update the library intentionally, from the parent repository run:
+To bring in upstream library changes, run these commands from this plugin repo:
 
 ```sh
-git submodule update --remote logic-plugin/libcsynth
+git submodule update --init --remote libcsynth
+cmake --build build --config Release --parallel 4
+ctest --test-dir build -C Release --output-on-failure
+git add libcsynth
+git commit -m "Update libcsynth"
 ```
 
 Build and test afterward, then commit the changed submodule pointer. The current
-revision includes filters and the sample-bank API, both required by the plugin.
+revision includes filters, samples, graph FM routing and the refreshed factory bank.
 
 The first full build takes longer because JUCE is compiled too. Subsequent
 source edits reuse those objects. The build doesn't install anything into your
@@ -231,7 +227,7 @@ or unrelated plugin caches as part of this project's installation.
 
 ## Working with the controls
 
-The editor is 1,180 × 700 by default and has five tabs:
+The editor is 1,180 × 700 by default and has six tabs:
 
 | Tab | What it controls |
 | --- | --- |
@@ -239,6 +235,7 @@ The editor is 1,180 × 700 by default and has five tabs:
 | **Output & filters** | Master ADSR, lowpass/highpass cutoffs, and output gain. |
 | **Effects** | Free or tempo-synced echo, plus reverb. |
 | **Keyboard** | An on-screen piano for testing with the mouse. |
+| **FM routing** | Per-layer algorithms, custom incoming connections, audible operator levels, and feedback. |
 | **Samples** | Recording files, their base frequencies, and FM/sample source selection. |
 
 Presets and the live spectrogram stay visible on every tab. Switching tabs
@@ -272,8 +269,10 @@ They don't change the active counts. Turn up Active layers / Active operators
 to bring more slots into the sound. Inactive slots keep their settings and are
 included in saved state.
 
-The final active operator is the carrier. It has no next operator to modulate,
-so its FM-depth/index-envelope controls are disabled. Modulators shape timbre;
+In Serial chain mode, the final active operator is the carrier. It has no next operator to modulate,
+so its FM-depth controls are disabled. Its index envelope becomes available
+when self-feedback is enabled. Graph algorithms can have several carriers and
+shared modulators. Modulators shape timbre;
 the master ADSR shapes amplitude. Waveforms include noise for breath/texture.
 
 Knobs support dragging, wheel changes, and typing into their value boxes.
@@ -282,8 +281,8 @@ the configured release and effect tails still finish normally.
 
 Disabled operator controls show a reason below the knob. For example, pulse
 width asks you to choose Pulse, and index-envelope knobs ask for Decay or ADSR
-mode. The carrier has no FM depth or index envelope; select an earlier operator
-or increase Active operators to make it a modulator. Hover a control’s label or
+mode. An operator with no outgoing route has no FM depth to edit. Add a route or
+feedback to use its index envelope; see FM routing below. Hover a control’s label or
 reason for the full explanation. These hints update when you change the selected
 operator, waveform, envelope mode, preset, or source. In sample mode, FM-only
 controls say **Sample source: FM only**; master ADSR, filters, effects, and
@@ -322,6 +321,49 @@ The audio thread only copies samples into a fixed-size queue while an editor
 exists. FFTs and drawing run on the UI thread, and closing the editor disables
 capture. If the UI falls behind, visualization data is discarded; audio never
 waits for the display. The spectrogram is not stored with your patch.
+
+## FM routing
+
+The diagram follows the selected preset and layer: blue arrows show modulation,
+gold paths show operators feeding the audio mix, and pink loops show self-feedback.
+Click an operator to select its controls; its white border and highlighted routes
+show what you are editing. Changing presets, algorithms, operator counts, routing,
+output levels or feedback updates the diagram, including changes from automation.
+In sample mode it labels the FM graph as inactive.
+
+Open **FM routing**, choose a layer and destination operator, then choose an
+algorithm. Active layers/operators are still set on **Synth**.
+
+- **Serial chain** keeps the original sound: OP1 → OP2 → … → the last carrier.
+- **Parallel pairs** makes independent two-operator stacks in the same layer.
+- **Modulators to carrier** sums every earlier operator into the last one.
+- **Shared modulator** sends OP1 to every later carrier.
+- **Additive carriers** mixes independent operators without inter-operator FM.
+- **Custom graph** lets each earlier operator feed the selected destination.
+
+The **From OP** knobs scale incoming connections. The source operator's FM
+depth and index envelope scale its modulation; adjust those on Synth.
+**Audible output** controls this operator's contribution to the normalized
+carrier mix. Serial mode fixes the last carrier at unity for compatibility.
+**Feedback** feeds the operator's previous output into its own instantaneous
+frequency. Start low: this is frequency feedback, not phase modulation, and
+high feedback/depth can alias. Index envelopes shape feedback as well as
+outgoing modulation; master ADSR still controls note volume.
+
+Connections only run from earlier to later operators; reorder your design
+rather than creating a cycle. A custom operator can both modulate and be
+heard. Muted carrier levels are allowed; the graph readout shows the actual
+connections and audible operators. Sample mode disables these FM controls
+with an explanation. Algorithms, routes, output levels, and feedback are
+host-automatable and saved with Logic projects and version-3 `.synth` files.
+Older project states and v1/v2 files restore as serial chains with no feedback.
+
+Eight new presets demonstrate the choices: **Graph Tine Duo**, **Graph Prism
+Bell**, **Graph Hollow Reed**, **Graph Air Choir**, **Graph Feedback Bass**,
+**Graph Glass Cascade**, **Graph Drawbar Organ**, and **Graph Orbit Texture**.
+The previous 64 preset indices are preserved.
+
+![FM routing tab with parallel stacks and feedback](docs/routing.png)
 
 ## Sample instruments
 
@@ -468,7 +510,9 @@ You can also use Logic's plugin settings menu to save/recall a setting for reuse
 in other projects.
 
 **Import .synth** reads settings saved by the SDL app or libcsynth. Version 1
-files load with filters off; version 2 includes filter cutoffs. Values beyond
+files load with filters off; version 2 includes filter cutoffs; version 3 adds
+FM routing, carrier levels, and feedback. Export writes v3, so older library
+builds need updating to read these files. Values beyond
 this plugin's parameter ranges are clamped to the supported range.
 
 **Export .synth** writes the synth patch to a new file. Its name is derived from
@@ -560,21 +604,11 @@ reach the engine on the audio thread. Recording decoding happens on the
 calling control thread outside the callback lock; bank replacement and source
 switching take that lock to exclude rendering.
 
-To move this project into a separate repo, copy this folder **without** its
-`build*` directories or `libcsynth/` checkout, then initialize the new repository:
-
-```sh
-git init
-git submodule add https://github.com/Ricardicus/libcsynth.git libcsynth
-git -C libcsynth checkout 694d01d16b9f11869ec907add030f7e06bce0a46
-git add .gitmodules libcsynth
-```
-
-Commit the project files along with `.gitmodules` and the submodule pointer.
-The registration currently lives in the parent repository’s `.gitmodules`,
-so copying files alone does not preserve it. Future clones of the new repo can
-use `git clone --recurse-submodules <your-repository-url>`. The sibling SDL app
-and its build aren't required.
+The plugin has its own Git history and remote. Its `.gitmodules` registers
+libcsynth from upstream; the submodule pointer records the version tested with
+this plugin. Develop library features in the libcsynth repository, publish them
+there, then update this dependency. This keeps upstream as the source of truth
+while letting the plugin and SDL app choose when to adopt a new revision.
 
 ## Distribution
 
@@ -602,15 +636,15 @@ option. Ordinary library builds still default to 2,000 ms.
 
 With `BUILD_TESTING=ON`, build the editor capture tool and point it at the
 folder containing `Piano.pp.A3.wav`, `Piano.pp.A4.wav`, and `Piano.pp.A5.wav`.
-From the parent repository:
+From the plugin repository:
 
 ```sh
-cmake --build logic-plugin/build --target CSynthScreenshots --parallel 4
-./logic-plugin/build/CSynthScreenshots logic-plugin/docs libcsynth/media
+cmake --build build --target CSynthScreenshots --parallel 4
+./build/CSynthScreenshots docs /path/to/piano-recordings
 ```
 
 It writes `editor.png`, `output.png`, `effects.png`, `keyboard.png`, and
-`samples.png` using the real plugin editor, with rendered audio feeding the
+`samples.png`, and `routing.png` using the real plugin editor, with rendered audio feeding the
 spectrogram. It does not install the plugin or open Logic. The capture tool
 only needs those recordings when generating the Samples view; building the
 plugin itself does not depend on these particular piano files.

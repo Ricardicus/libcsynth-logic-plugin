@@ -8,7 +8,7 @@ extern "C" {
 #include <vector>
 
 namespace parameters {
-enum class Kind { real, integer, waveform, indexMode };
+enum class Kind { real, integer, waveform, indexMode, algorithm };
 struct Spec {
     juce::String id, name;
     std::size_t offset;
@@ -17,6 +17,7 @@ struct Spec {
     double read(const SynthConfig&) const;
     void write(SynthConfig&, float) const;
 };
+bool routingParameter(const Spec&);
 const std::vector<Spec>& specs();
 juce::AudioProcessorValueTreeState::ParameterLayout layout();
 juce::String layerId(int layer, const juce::String& field);

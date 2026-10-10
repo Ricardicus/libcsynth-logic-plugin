@@ -25,6 +25,50 @@ struct TestPlayHead : juce::AudioPlayHead {
     PositionInfo position;
     juce::Optional<PositionInfo> getPosition() const override { return position; }
 };
+static void graphState()
+{
+    CSynthProcessor processor;
+    processor.setCurrentProgram(64); CHECK(processor.readConfig().layers[0].fm.algorithm==FM_ALGORITHM_PAIRS);
+    set(processor,"l0_algorithm",FM_ALGORITHM_CUSTOM); set(processor,"l0_route_0_3",.625f);
+    set(processor,"l0_o3_output",.8f); set(processor,"l0_o0_feedback",.7f);
+    juce::MemoryBlock saved; processor.getStateInformation(saved);
+    CSynthProcessor restored; restored.setStateInformation(saved.getData(),static_cast<int>(saved.getSize()));
+    const auto fm=restored.readConfig().layers[0].fm;
+    CHECK(fm.algorithm==FM_ALGORITHM_CUSTOM && std::abs(fm.routing[0][3]-.625)<1e-5);
+    CHECK(std::abs(fm.operators[3].outputLevel-.8)<1e-5 && std::abs(fm.operators[0].feedback-.7)<1e-5);
+    auto legacy=processor.state.copyState(); legacy.setProperty("schema",1,nullptr);
+    for (const auto& spec : parameters::specs()) if (parameters::routingParameter(spec))
+        legacy.removeChild(legacy.getChildWithProperty("id",spec.id),nullptr);
+    juce::MemoryBlock old; juce::AudioProcessor::copyXmlToBinary(*legacy.createXml(),old);
+    restored.setStateInformation(old.getData(),static_cast<int>(old.getSize()));
+    auto chain=restored.readConfig().layers[0].fm;
+    CHECK(chain.algorithm==FM_ALGORITHM_CHAIN && chain.routing[0][3]<=0);
+    CHECK(chain.operators[0].feedback<=0 && std::abs(chain.operators[3].outputLevel-1)<1e-6);
+    std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+    for (auto* child : editor->getChildren())
+        if (auto* button=dynamic_cast<juce::TextButton*>(child))
+            if (button->getButtonText()=="FM routing") { button->onClick(); CHECK(button->getToggleState()); }
+    juce::Thread::sleep(80); juce::Timer::callPendingTimersSynchronously();
+    for (auto* child : editor->getChildren()) if (child->isVisible()) CHECK(editor->getLocalBounds().contains(child->getBounds()));
+    for (auto* child : editor->getChildren())
+        if (auto* combo=dynamic_cast<juce::ComboBox*>(child))
+            if (combo->getName()=="Routing destination") combo->setSelectedId(4,juce::sendNotificationSync);
+    bool routeEdited=false;
+    for (auto* child : editor->getChildren()) if (child->getName()=="From OP1")
+        for (auto* control : child->getChildren()) if (auto* slider=dynamic_cast<juce::Slider*>(control)) {
+            CHECK(slider->isEnabled()); slider->setValue(.4,juce::sendNotificationSync); routeEdited=true;
+        }
+    CHECK(routeEdited && std::abs(processor.readConfig().layers[0].fm.routing[0][3]-.4)<1e-5);
+    processor.setCurrentProgram(64); set(processor,"l0_o3_output",0);
+    juce::Thread::sleep(80); juce::Timer::callPendingTimersSynchronously();
+    for (auto* child : editor->getChildren()) if (child->getName()=="Audible output")
+        for (auto* control : child->getChildren()) if (auto* slider=dynamic_cast<juce::Slider*>(control))
+            CHECK(slider->isEnabled()); // A muted carrier must still be editable.
+    processor.prepareToPlay(48000,512); juce::AudioBuffer<float> out(2,512); juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::noteOn(1,69,static_cast<juce::uint8>(127)),0); processor.processBlock(out,midi);
+    CHECK(energy(out)>0);
+    set(processor,"l0_algorithm",FM_ALGORITHM_FAN_OUT); processor.processBlock(out,midi); CHECK(energy(out)>0);
+}
 static void sampleInstrument()
 {
     auto file=juce::File("/tmp").getNonexistentChildFile("csynth-sample-test",".wav");
@@ -117,6 +161,7 @@ int main()
 {
     juce::ScopedJuceInitialiser_GUI init;
     try {
+        graphState();
         sampleInstrument();
         CHECK(std::abs(echoTiming::milliseconds(1,120,213)-62.5)<.001);
         CHECK(std::abs(echoTiming::milliseconds(8,120,213)-375)<.001);
@@ -232,7 +277,7 @@ int main()
             CHECK(juce::PNGImageFormat().writeImageToStream(snapshot,output));
         }
         CHECK(editor->getHeight()==700);
-        for (const auto& pageName : {"Output & filters","Effects","Keyboard","Samples","Synth"}) {
+        for (const auto& pageName : {"Output & filters","Effects","Keyboard","Samples","FM routing","Synth"}) {
             bool selected=false;
             for (auto* child : editor->getChildren())
                 if (auto* button=dynamic_cast<juce::TextButton*>(child))
@@ -298,7 +343,7 @@ int main()
             }
         }
         editor.reset(); CHECK(!a.spectrumTap.enabled.load()); a.releaseResources(); b.releaseResources();
-        std::cout << "MIDI offsets, sustain, channels, automation/state, 64 programs and editor passed.\n";
+        std::cout << "MIDI offsets, sustain, channels, automation/state, 72 programs and editor passed.\n";
         return 0;
     } catch(const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
