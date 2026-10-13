@@ -25,6 +25,16 @@ struct TestPlayHead : juce::AudioPlayHead {
     PositionInfo position;
     juce::Optional<PositionInfo> getPosition() const override { return position; }
 };
+static std::vector<juce::Component*> descendants(juce::Component& parent)
+{
+    std::vector<juce::Component*> result;
+    for (auto* child : parent.getChildren()) {
+        result.push_back(child);
+        auto nested=descendants(*child);
+        result.insert(result.end(),nested.begin(),nested.end());
+    }
+    return result;
+}
 static void graphState()
 {
     CSynthProcessor processor;
@@ -47,21 +57,27 @@ static void graphState()
     std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
     for (auto* child : editor->getChildren())
         if (auto* button=dynamic_cast<juce::TextButton*>(child))
-            if (button->getButtonText()=="FM routing") { button->onClick(); CHECK(button->getToggleState()); }
+            if (button->getButtonText()=="FM modulation") { button->onClick(); CHECK(button->getToggleState()); }
     juce::Thread::sleep(80); juce::Timer::callPendingTimersSynchronously();
     for (auto* child : editor->getChildren()) if (child->isVisible()) CHECK(editor->getLocalBounds().contains(child->getBounds()));
     for (auto* child : editor->getChildren())
         if (auto* combo=dynamic_cast<juce::ComboBox*>(child))
             if (combo->getName()=="Routing destination") combo->setSelectedId(4,juce::sendNotificationSync);
     bool routeEdited=false;
-    for (auto* child : editor->getChildren()) if (child->getName()=="From OP1")
+    for (auto* child : descendants(*editor)) if (child->getName()=="From OP1")
         for (auto* control : child->getChildren()) if (auto* slider=dynamic_cast<juce::Slider*>(control)) {
             CHECK(slider->isEnabled()); slider->setValue(.4,juce::sendNotificationSync); routeEdited=true;
         }
+    bool ratioEdited=false;
+    for (auto* knob : descendants(*editor)) if (knob->getName()=="Ratio")
+        for (auto* control : knob->getChildren()) if (auto* slider=dynamic_cast<juce::Slider*>(control)) {
+            CHECK(knob->isVisible()); slider->setValue(2.5,juce::sendNotificationSync); ratioEdited=true;
+        }
+    CHECK(ratioEdited && std::abs(processor.readConfig().layers[0].fm.operators[3].ratio-2.5)<1e-5);
     CHECK(routeEdited && std::abs(processor.readConfig().layers[0].fm.routing[0][3]-.4)<1e-5);
     processor.setCurrentProgram(64); set(processor,"l0_o3_output",0);
     juce::Thread::sleep(80); juce::Timer::callPendingTimersSynchronously();
-    for (auto* child : editor->getChildren()) if (child->getName()=="Audible output")
+    for (auto* child : descendants(*editor)) if (child->getName()=="Audible output")
         for (auto* control : child->getChildren()) if (auto* slider=dynamic_cast<juce::Slider*>(control))
             CHECK(slider->isEnabled()); // A muted carrier must still be editable.
     processor.prepareToPlay(48000,512); juce::AudioBuffer<float> out(2,512); juce::MidiBuffer midi;
@@ -277,7 +293,7 @@ int main()
             CHECK(juce::PNGImageFormat().writeImageToStream(snapshot,output));
         }
         CHECK(editor->getHeight()==700);
-        for (const auto& pageName : {"Output & filters","Effects","Keyboard","Samples","FM routing","Synth"}) {
+        for (const auto& pageName : {"Output & filters","Effects","Keyboard","Samples","FM modulation","Synth"}) {
             bool selected=false;
             for (auto* child : editor->getChildren())
                 if (auto* button=dynamic_cast<juce::TextButton*>(child))
@@ -334,12 +350,13 @@ int main()
                     CHECK(juce::PNGImageFormat().writeImageToStream(image,output));
                 }
             }
+            for (auto* knob : descendants(*editor)) if (knob->getName()=="Ratio")
+                CHECK(knob->isVisible()==(juce::String(pageName)=="FM modulation"));
             for (auto* child : editor->getChildren()) {
                 if (dynamic_cast<juce::MidiKeyboardComponent*>(child)!=nullptr) CHECK(child->isVisible()==(juce::String(pageName)=="Keyboard"));
                 if (child->isVisible()) CHECK(editor->getLocalBounds().contains(child->getBounds()));
                 if (child->getName()=="Low-pass") CHECK(child->isVisible()==(juce::String(pageName)=="Output & filters"));
                 if (child->getName()=="Echo mix") CHECK(child->isVisible()==(juce::String(pageName)=="Effects"));
-                if (child->getName()=="Ratio") CHECK(child->isVisible()==(juce::String(pageName)=="Synth"));
             }
         }
         editor.reset(); CHECK(!a.spectrumTap.enabled.load()); a.releaseResources(); b.releaseResources();

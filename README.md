@@ -11,7 +11,7 @@ sounds without a DAW. There is no SDL dependency in this project: Logic supplies
 the audio device and MIDI, JUCE supplies the plugin wrapper/editor, and
 libcsynth renders the samples.
 
-![Synth tab: FM layers and operators, factory preset controls, and live output spectrogram](docs/editor.png)
+![Synth tab: layer controls, factory preset controls, and live output spectrogram](docs/editor.png)
 
 The screenshots below come from the current editor at its default 1,180 × 700
 size. The Samples view uses the three piano recordings described below; all
@@ -86,7 +86,7 @@ git commit -m "Update libcsynth"
 ```
 
 Build and test afterward, then commit the changed submodule pointer. The current
-revision includes filters, samples, graph FM routing and the refreshed factory bank.
+revision includes filters, samples, graph FM modulation and the refreshed factory bank.
 
 The first full build takes longer because JUCE is compiled too. Subsequent
 source edits reuse those objects. The build doesn't install anything into your
@@ -231,11 +231,11 @@ The editor is 1,180 × 700 by default and has six tabs:
 
 | Tab | What it controls |
 | --- | --- |
-| **Synth** | Layers, gain/detune, and FM operators. |
+| **Synth** | Active layers/operators and layer gain/detune. |
 | **Output & filters** | Master ADSR, lowpass/highpass cutoffs, and output gain. |
 | **Effects** | Free or tempo-synced echo, plus reverb. |
 | **Keyboard** | An on-screen piano for testing with the mouse. |
-| **FM routing** | Per-layer algorithms, custom incoming connections, audible operator levels, and feedback. |
+| **FM modulation** | Routing diagram, algorithm, waveform, ratio, FM depth, vibrato, index envelopes, output levels, and feedback. |
 | **Samples** | Recording files, their base frequencies, and FM/sample source selection. |
 
 Presets and the live spectrogram stay visible on every tab. Switching tabs
@@ -264,7 +264,8 @@ an effect tail that is already ringing.
 **Echo / Reverb** controls the shared effects for both sources. Choose **Free
 (ms)** for a millisecond delay, or a note division that follows Logic's tempo.
 
-**Edit layer** and **Edit operator** choose which stored slot the controls show.
+**Edit layer** on Synth and the layer/operator selectors on **FM modulation**
+choose which stored slot the controls show.
 They don't change the active counts. Turn up Active layers / Active operators
 to bring more slots into the sound. Inactive slots keep their settings and are
 included in saved state.
@@ -282,7 +283,7 @@ the configured release and effect tails still finish normally.
 Disabled operator controls show a reason below the knob. For example, pulse
 width asks you to choose Pulse, and index-envelope knobs ask for Decay or ADSR
 mode. An operator with no outgoing route has no FM depth to edit. Add a route or
-feedback to use its index envelope; see FM routing below. Hover a control’s label or
+feedback to use its index envelope; see FM modulation below. Hover a control’s label or
 reason for the full explanation. These hints update when you change the selected
 operator, waveform, envelope mode, preset, or source. In sample mode, FM-only
 controls say **Sample source: FM only**; master ADSR, filters, effects, and
@@ -322,7 +323,7 @@ exists. FFTs and drawing run on the UI thread, and closing the editor disables
 capture. If the UI falls behind, visualization data is discarded; audio never
 waits for the display. The spectrogram is not stored with your patch.
 
-## FM routing
+## FM modulation
 
 The diagram follows the selected preset and layer: blue arrows show modulation,
 gold paths show operators feeding the audio mix, and pink loops show self-feedback.
@@ -331,7 +332,7 @@ show what you are editing. Changing presets, algorithms, operator counts, routin
 output levels or feedback updates the diagram, including changes from automation.
 In sample mode it labels the FM graph as inactive.
 
-Open **FM routing**, choose a layer and destination operator, then choose an
+Open **FM modulation**, choose a layer and operator, then choose an
 algorithm. Active layers/operators are still set on **Synth**.
 
 - **Serial chain** keeps the original sound: OP1 → OP2 → … → the last carrier.
@@ -363,7 +364,11 @@ Bell**, **Graph Hollow Reed**, **Graph Air Choir**, **Graph Feedback Bass**,
 **Graph Glass Cascade**, **Graph Drawbar Organ**, and **Graph Orbit Texture**.
 The previous 64 preset indices are preserved.
 
-![FM routing tab with parallel stacks and feedback](docs/routing.png)
+![FM modulation: interactive operator graph and connection controls](docs/routing.png)
+
+Scroll within the same tab to edit the selected operator's sound:
+
+![FM modulation: waveform, vibrato, FM depth and index envelope](docs/modulation.png)
 
 ## Sample instruments
 
@@ -511,7 +516,7 @@ in other projects.
 
 **Import .synth** reads settings saved by the SDL app or libcsynth. Version 1
 files load with filters off; version 2 includes filter cutoffs; version 3 adds
-FM routing, carrier levels, and feedback. Export writes v3, so older library
+FM modulation, carrier levels, and feedback. Export writes v3, so older library
 builds need updating to read these files. Values beyond
 this plugin's parameter ranges are clamped to the supported range.
 
@@ -648,3 +653,9 @@ It writes `editor.png`, `output.png`, `effects.png`, `keyboard.png`, and
 spectrogram. It does not install the plugin or open Logic. The capture tool
 only needs those recordings when generating the Samples view; building the
 plugin itself does not depend on these particular piano files.
+
+Operator waveform, ratio, FM depth, vibrato and index envelopes live on
+**FM modulation**, alongside the diagram and connection controls. Select a
+layer and operator above the diagram, or click a diagram node. Scroll the panel
+to reach the operator sound controls; the plugin window keeps its compact size.
+**Synth** contains layer counts, gain, detune and active-operator counts.

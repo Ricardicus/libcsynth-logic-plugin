@@ -30,10 +30,12 @@ private:
     juce::ComboBox presets, layer, op, waveform, envelope, echoTiming;
     juce::TextButton previous{"<"}, next{">"}, import{"Import .synth"}, exportSound{"Export .synth"}, release{"Release notes"};
     juce::Label layerLabel, operatorLabel, status, envelopeAvailability, echoTimingInfo;
-    juce::TextButton synthTab{"Synth"}, outputTab{"Output & filters"}, effectsTab{"Effects"}, keyboardTab{"Keyboard"}, samplesTab{"Samples"}, routingTab{"FM routing"};
+    juce::TextButton synthTab{"Synth"}, outputTab{"Output & filters"}, effectsTab{"Effects"}, keyboardTab{"Keyboard"}, samplesTab{"Samples"}, routingTab{"FM modulation"};
     juce::ComboBox algorithm, routingLayer, routingOp;
     juce::Label routingInfo;
     RoutingDiagram routingDiagram;
+    juce::Component modulationContent;
+    juce::Viewport modulationViewport;
     std::vector<std::unique_ptr<Knob>> routingKnobs;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> algorithmAttachment;
     SamplePanel samplePanel;

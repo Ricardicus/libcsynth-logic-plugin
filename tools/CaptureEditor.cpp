@@ -66,11 +66,15 @@ int main(int argc,char** argv)
         // The real editor must update when the host selects a different preset.
         processor.setCurrentProgram(64);
         parameter(processor,"l0_o1_feedback",.15f);
-        capture("FM routing","routing.png");
+        capture("FM modulation","routing.png");
         RoutingDiagram* live=nullptr;
         juce::ComboBox* destination=nullptr;
+        std::function<void(juce::Component*)> findGraph=[&](juce::Component* parent) {
+            if (auto* graph=dynamic_cast<RoutingDiagram*>(parent)) live=graph;
+            for (auto* child : parent->getChildren()) findGraph(child);
+        };
+        findGraph(editor.get());
         for (auto* child : editor->getChildren()) {
-            if (auto* graph=dynamic_cast<RoutingDiagram*>(child)) live=graph;
             if (auto* combo=dynamic_cast<juce::ComboBox*>(child))
                 if (combo->getName()=="Routing destination") destination=combo;
         }
@@ -87,7 +91,23 @@ int main(int argc,char** argv)
         require(changed,"Diagram did not follow preset change");
         parameter(processor,"l0_o2_feedback",.3f);
         live->onSelect(2);
-        capture("FM routing","routing.png");
+        capture("FM modulation","routing.png");
+        auto* content=live->getParentComponent();
+        juce::Slider* ratio=nullptr;
+        for (auto* knob : content->getChildren()) if (knob->getName()=="Ratio")
+            for (auto* child : knob->getChildren()) if (auto* slider=dynamic_cast<juce::Slider*>(child)) ratio=slider;
+        require(ratio && ratio->isVisible(),"Operator controls missing from modulation panel");
+        const double original=ratio->getValue();
+        ratio->setValue(2.5,juce::sendNotificationSync);
+        require(std::abs(processor.readConfig().layers[0].fm.operators[2].ratio-2.5)<.001,"Diagram selection did not bind operator sound controls");
+        ratio->setValue(original,juce::sendNotificationSync);
+        auto* viewport=dynamic_cast<juce::Viewport*>(content->getParentComponent()->getParentComponent());
+        require(viewport!=nullptr,"Modulation panel must scroll");
+        viewport->setViewPosition(0,content->getHeight());
+        capture("FM modulation","modulation.png");
+        viewport->setViewPosition(0,0);
+        capture("Synth","editor.png");
+        require(!ratio->getParentComponent()->isVisible(),"Operator controls still shown on Synth tab");
         processor.releaseAllNotes(); advance();
         std::vector<CSynthProcessor::SampleFile> files;
         for (int octave=3;octave<=5;++octave) {
